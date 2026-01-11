@@ -37,6 +37,7 @@ import Advance from './pages/Advance';
 import Deductions from './pages/Deductions';
 import EmployeesReport from './pages/SiesEmployees';
 import MakePayment from './pages/Makepayment';  // IMPORTANT: Make sure this path is correct
+import HrPoLicy from './pages/Hrpolicy'
 
 function App() {
   return (
@@ -84,6 +85,7 @@ function App() {
             <Route path="store-department" element={<Store />} />
             <Route path="hod-verification" element={<HodVerification />} />
             <Route path="employees" element={<EmployeesReport />} />
+            <Route path="hr-policy" element={<HrPoLicy />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

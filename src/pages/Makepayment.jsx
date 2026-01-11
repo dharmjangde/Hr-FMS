@@ -489,14 +489,14 @@ const MakePayment = () => {
                                 Pay Now
                               </button>
                               
-                              <button
+                              {/* <button
                                 onClick={() => downloadPaySlip(item.employeeCode)}
                                 className="flex items-center gap-1 px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300 transition-colors"
                                 title="Download Pay Slip"
                               >
                                 <Download size={12} />
                                 Slip
-                              </button>
+                              </button> */}
                               
                               {item.paymentLink && (
                                 <a

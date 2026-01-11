@@ -9,13 +9,11 @@ const FindEnquiry = () => {
   const [selectedItem, setSelectedItem] = useState(null);
   const [indentData, setIndentData] = useState([]);
   const [enquiryData, setEnquiryData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [tableLoading, setTableLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
   const [generatedCandidateNo, setGeneratedCandidateNo] = useState('');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadingResume, setUploadingResume] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   const [formData, setFormData] = useState({
     candidateName: '',
@@ -32,53 +30,43 @@ const FindEnquiry = () => {
     candidateResume: null,
     presentAddress: '',
     aadharNo: '',
-    // status: 'NeedMore'
   });
-// Helper function to parse DD/MM/YYYY format
-const parseDDMMYYYY = (dateString) => {
-  if (!dateString || dateString.trim() === '') return null;
-  
-  try {
-    const parts = dateString.split('/');
-    if (parts.length === 3) {
-      const day = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1; // Months are 0-indexed
-      const year = parseInt(parts[2], 10);
-      
-      // Return a formatted string instead of Date object
-      return dateString; // Return the original string
-    }
-  } catch (error) {
-    console.error('Error parsing date:', dateString, error);
-  }
-  return null;
-};
 
-// Format date for display
-const formatDateForDisplay = (dateString) => {
-  const parsed = parseDDMMYYYY(dateString);
-  return parsed || "-";
-};
+  // Helper function to parse DD/MM/YYYY format
+  const parseDDMMYYYY = (dateString) => {
+    if (!dateString || dateString.trim() === '') return null;
+    
+    try {
+      const parts = dateString.split('/');
+      if (parts.length === 3) {
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const year = parseInt(parts[2], 10);
+        return dateString;
+      }
+    } catch (error) {
+      console.error('Error parsing date:', dateString, error);
+    }
+    return null;
+  };
+
+  // Format date for display
+  const formatDateForDisplay = (dateString) => {
+    const parsed = parseDDMMYYYY(dateString);
+    return parsed || "-";
+  };
+
   // Google Drive folder ID for file uploads
   const GOOGLE_DRIVE_FOLDER_ID = '1Rb4DIzbZWSVyL5s_z4d0ntk0iM-JZWBq';
 
   // Function to count enquiries for each indent
   const countEnquiriesForIndent = (indentNo) => {
-    if (!indentNo || enquiryData.length === 0) return { filled: 0, remaining: 0 };
-    
-    const count = enquiryData.filter(enquiry => 
-      enquiry.indentNo === indentNo
-    ).length;
-    
-    return count;
+    if (!indentNo || enquiryData.length === 0) return 0;
+    return enquiryData.filter(enquiry => enquiry.indentNo === indentNo).length;
   };
 
   // Fetch all necessary data
   const fetchAllData = async () => {
-    setLoading(true);
-    setTableLoading(true);
-    setError(null);
-
     try {
       // Fetch INDENT data
       const indentResponse = await fetch(
@@ -119,14 +107,13 @@ const formatDateForDisplay = (dateString) => {
             indentNo: row[getIndex('Indent Number')],
             post: row[getIndex('Post')],
             department: row[getIndex('Department')],
-            plannedDate: row[planned2Index] || '', // Add Planned 2 data
+            plannedDate: parseDDMMYYYY(row[planned2Index]),
             gender: row[getIndex('Gender')],
             prefer: row[getIndex('Prefer')],
-            numberOfPost: parseInt(row[6]) || 0,     // Column G
-            competitionDate: row[7],                 // Column H
+            numberOfPost: parseInt(row[6]) || 0,
+            competitionDate: row[7],
             socialSite: row[getIndex('Social Site')],
             status: row[statusIndex],
-            plannedDate: parseDDMMYYYY(row[planned2Index]), // Use existing function
             actual: row[actual2Index],
             experience: row[getIndex('Experience')],
           }));
@@ -150,53 +137,42 @@ const formatDateForDisplay = (dateString) => {
 
           const getEnquiryIndex = (headerName) => headers.findIndex(h => h === headerName);
 
-          // Process ENQUIRY data for history tab
-          // Process ENQUIRY data for history tab
-const processedEnquiryData = enquiryRows
-  .filter(row => row[getEnquiryIndex('Timestamp')])
-  .map(row => ({
-    id: row[getEnquiryIndex('Timestamp')],
-    indentNo: row[getEnquiryIndex('Indent Number')],
-    candidateEnquiryNo: row[getEnquiryIndex('Candidate Enquiry Number')],
-    applyingForPost: row[getEnquiryIndex('Applying For the Post')],
-    // FIX: Changed from getIndex to getEnquiryIndex
-    department: row[getEnquiryIndex('Department')],  // CHANGED THIS LINE
-    candidateName: row[getEnquiryIndex('Candidate Name')],
-    candidateDOB: row[getEnquiryIndex('DCB')],
-    candidatePhone: row[getEnquiryIndex('Candidate Phone Number')],
-    candidateEmail: row[getEnquiryIndex('Candidate Email')],
-    previousCompany: row[getEnquiryIndex('Previous Company Name')],
-    jobExperience: row[getEnquiryIndex('Job Experience')] || '',
-    lastSalary: row[getEnquiryIndex('Last Salary')] || '',
-    previousPosition: row[getEnquiryIndex('Previous Position')] || '',
-    reasonForLeaving: row[getEnquiryIndex('Reason For Leaving')] || '',
-    maritalStatus: row[getEnquiryIndex('Marital Status')] || '',
-    lastEmployerMobile: row[getEnquiryIndex('Last Employer Mobile')] || '',
-    candidatePhoto: row[getEnquiryIndex('Candidate Photo')] || '',
-    candidateResume: row[19] || '',
-    referenceBy: row[getEnquiryIndex('Reference By')] || '',
-    presentAddress: row[getEnquiryIndex('Present Address')] || '',
-    aadharNo: row[getEnquiryIndex('Aadhar No')] || '',
-    interviewDate: row[20] || ''
-  }));
+          const processedEnquiryData = enquiryRows
+            .filter(row => row[getEnquiryIndex('Timestamp')])
+            .map(row => ({
+              id: row[getEnquiryIndex('Timestamp')],
+              indentNo: row[getEnquiryIndex('Indent Number')],
+              candidateEnquiryNo: row[getEnquiryIndex('Candidate Enquiry Number')],
+              applyingForPost: row[getEnquiryIndex('Applying For the Post')],
+              department: row[getEnquiryIndex('Department')],
+              candidateName: row[getEnquiryIndex('Candidate Name')],
+              candidateDOB: row[getEnquiryIndex('DCB')],
+              candidatePhone: row[getEnquiryIndex('Candidate Phone Number')],
+              candidateEmail: row[getEnquiryIndex('Candidate Email')],
+              previousCompany: row[getEnquiryIndex('Previous Company Name')],
+              jobExperience: row[getEnquiryIndex('Job Experience')] || '',
+              lastSalary: row[getEnquiryIndex('Last Salary')] || '',
+              previousPosition: row[getEnquiryIndex('Previous Position')] || '',
+              reasonForLeaving: row[getEnquiryIndex('Reason For Leaving')] || '',
+              maritalStatus: row[getEnquiryIndex('Marital Status')] || '',
+              lastEmployerMobile: row[getEnquiryIndex('Last Employer Mobile')] || '',
+              candidatePhoto: row[getEnquiryIndex('Candidate Photo')] || '',
+              candidateResume: row[19] || '',
+              referenceBy: row[getEnquiryIndex('Reference By')] || '',
+              presentAddress: row[getEnquiryIndex('Present Address')] || '',
+              aadharNo: row[getEnquiryIndex('Aadhar No')] || '',
+              interviewDate: row[20] || ''
+            }));
 
-setEnquiryData(processedEnquiryData);
-
-        } else {
-          setIndentData(processedData);
+          setEnquiryData(processedEnquiryData);
         }
-
       } else {
         throw new Error(indentResult.error || 'Not enough rows in INDENT sheet data');
       }
-
+      setDataLoaded(true);
     } catch (error) {
       console.error('Error fetching data:', error);
-      setError(error.message);
       toast.error('Failed to fetch data');
-    } finally {
-      setLoading(false);
-      setTableLoading(false);
     }
   };
 
@@ -299,64 +275,106 @@ setEnquiryData(processedEnquiryData);
 
   const historyData = enquiryData;
 
-  const handleEnquiryClick = (item = null) => {
-  let indentNo = '';
-  let isNewAAP = false;
-
-  if (item) {
-    // Check if maximum enquiries have been reached
-    const enquiryCount = countEnquiriesForIndent(item.indentNo);
-    if (enquiryCount >= item.numberOfPost) {
-      toast.error(`Maximum enquiries (${item.numberOfPost}) already filled for this indent.`);
+  // Function to cancel remaining posts
+  const handleCancelRemainingPosts = async (indentNo, currentTotalPosts, currentEnquiryCount) => {
+    if (!window.confirm(
+      `Cancel remaining posts for ${indentNo}?\n\n` +
+      `Current: ${currentEnquiryCount} enquiries\n` +
+      `Total Posts will change from ${currentTotalPosts} to ${currentEnquiryCount}`
+    )) {
       return;
     }
-    
-    setSelectedItem(item);
-    indentNo = item.indentNo;
-  } else {
-    indentNo = generateNextAAPIndentNumber();
-    isNewAAP = true;
 
-    setSelectedItem({
-      indentNo: indentNo,
-      post: '',
-      gender: '',
-      prefer: '',
-      numberOfPost: '',
-      competitionDate: '',
-      socialSite: '',
-      // REMOVE status field
-      plannedDate: '',
-      actual: '',
-      experience: ''
+    try {
+      const response = await fetch(
+        'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            sheetName: 'INDENT',
+            action: 'cancelPosts',
+            indentNumber: indentNo,
+            newPostCount: currentEnquiryCount.toString()
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to cancel posts');
+      }
+
+      toast.success(`${indentNo}: Posts updated to ${currentEnquiryCount}`);
+      
+      await fetchAllData();
+      setShowModal(false);
+
+    } catch (error) {
+      console.error('Error cancelling posts:', error);
+      toast.error(`Error: ${error.message}`);
+    }
+  };
+
+  const handleEnquiryClick = (item = null) => {
+    let indentNo = '';
+    let isNewAAP = false;
+
+    if (item) {
+      // Check if maximum enquiries have been reached
+      const enquiryCount = countEnquiriesForIndent(item.indentNo);
+      if (enquiryCount >= item.numberOfPost) {
+        toast.error(`Maximum enquiries (${item.numberOfPost}) already filled for this indent.`);
+        return;
+      }
+      
+      setSelectedItem(item);
+      indentNo = item.indentNo;
+    } else {
+      indentNo = generateNextAAPIndentNumber();
+      isNewAAP = true;
+
+      setSelectedItem({
+        indentNo: indentNo,
+        post: '',
+        gender: '',
+        prefer: '',
+        numberOfPost: '',
+        competitionDate: '',
+        socialSite: '',
+        plannedDate: '',
+        actual: '',
+        experience: ''
+      });
+    }
+
+    const candidateNo = generateCandidateNumber();
+    setGeneratedCandidateNo(candidateNo);
+    setFormData({
+      candidateName: '',
+      candidateDOB: '',
+      candidatePhone: '',
+      candidateEmail: '',
+      previousCompany: '',
+      jobExperience: '',
+      department: item ? item.department : '',
+      lastSalary: '',
+      previousPosition: '',
+      reasonForLeaving: '',
+      maritalStatus: '',
+      lastEmployerMobile: '',
+      interviewDate: '',
+      candidatePhoto: null,
+      candidateResume: null,
+      referenceBy: '',
+      presentAddress: '',
+      aadharNo: '',
     });
-  }
-
-  const candidateNo = generateCandidateNumber();
-  setGeneratedCandidateNo(candidateNo);
-  setFormData({
-    candidateName: '',
-    candidateDOB: '',
-    candidatePhone: '',
-    candidateEmail: '',
-    previousCompany: '',
-    jobExperience: '',
-    department: item ? item.department : '',
-    lastSalary: '',
-    previousPosition: '',
-    reasonForLeaving: '',
-    maritalStatus: '',
-    lastEmployerMobile: '',
-    interviewDate: '',
-    candidatePhoto: null,
-    candidateResume: null,
-    referenceBy: '',
-    presentAddress: '',
-    aadharNo: '',
-    // REMOVE status field
-  });
-  setShowModal(true);
-};
+    setShowModal(true);
+  };
 
   const formatDOB = (dateString) => {
     if (!dateString) return '';
@@ -389,113 +407,108 @@ setEnquiryData(processedEnquiryData);
   };
 
   const handleSubmit = async (e) => {
-  e.preventDefault();
-  
-  // Check if maximum enquiries reached
-  if (selectedItem) {
-    const enquiryCount = countEnquiriesForIndent(selectedItem.indentNo);
-    if (enquiryCount >= selectedItem.numberOfPost) {
-      toast.error(`Cannot submit: Maximum enquiries (${selectedItem.numberOfPost}) already filled.`);
-      return;
-    }
-  }
-  
-  setSubmitting(true);
-
-  try {
-    let photoUrl = '';
-    let resumeUrl = '';
-
-    // Upload photo if exists
-    if (formData.candidatePhoto) {
-      setUploadingPhoto(true);
-      photoUrl = await uploadFileToGoogleDrive(formData.candidatePhoto, 'photo');
-      setUploadingPhoto(false);
-      toast.success('Photo uploaded successfully!');
-    }
-
-    // Upload resume if exists
-    if (formData.candidateResume) {
-      setUploadingResume(true);
-      resumeUrl = await uploadFileToGoogleDrive(formData.candidateResume, 'resume');
-      setUploadingResume(false);
-      toast.success('Resume uploaded successfully!');
-    }
-
-    // Create timestamp
-    const now = new Date();
-    const day = String(now.getDate()).padStart(2, '0');
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const year = now.getFullYear();
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const seconds = String(now.getSeconds()).padStart(2, '0');
-
-    const formattedTimestamp = `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
-
-    const rowData = [
-      formattedTimestamp,
-      selectedItem.indentNo,
-      generatedCandidateNo,
-      selectedItem.post,
-      formData.candidateName,
-      formatDOB(formData.candidateDOB),
-      formData.candidatePhone,
-      formData.candidateEmail,
-      formData.previousCompany || '',
-      formData.jobExperience || '',
-      formData.department || '',
-      formData.previousPosition || '',
-      '',
-      formData.maritalStatus || '',
-      '',
-      photoUrl,
-      '',
-      formData.presentAddress || '',
-      formData.aadharNo || '',
-      resumeUrl,
-      formData.interviewDate || '',
-    ];
-
-    // Submit to ENQUIRY sheet
-    const enquiryResponse = await fetch(
-      'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          sheetName: 'ENQUIRY',
-          action: 'insert',
-          rowData: JSON.stringify(rowData)
-        }),
-      }
-    );
-
-    const enquiryResult = await enquiryResponse.json();
-
-    if (!enquiryResult.success) {
-      throw new Error(enquiryResult.error || 'ENQUIRY submission failed');
-    }
-
-    // DON'T update INDENT sheet at all - removed all INDENT update logic
+    e.preventDefault();
     
-    toast.success('Enquiry submitted successfully!');
-    setShowModal(false);
-    fetchAllData();
+    if (selectedItem) {
+      const enquiryCount = countEnquiriesForIndent(selectedItem.indentNo);
+      if (enquiryCount >= selectedItem.numberOfPost) {
+        toast.error(`Cannot submit: Maximum enquiries (${selectedItem.numberOfPost}) already filled.`);
+        return;
+      }
+    }
+    
+    setSubmitting(true);
 
-  } catch (error) {
-    console.error('Submission error:', error);
-    toast.error(`Error: ${error.message}`);
-  } finally {
-    setSubmitting(false);
-    setUploadingPhoto(false);
-    setUploadingResume(false);
-  }
-};
+    try {
+      let photoUrl = '';
+      let resumeUrl = '';
 
+      // Upload photo if exists
+      if (formData.candidatePhoto) {
+        setUploadingPhoto(true);
+        photoUrl = await uploadFileToGoogleDrive(formData.candidatePhoto, 'photo');
+        setUploadingPhoto(false);
+        toast.success('Photo uploaded successfully!');
+      }
 
+      // Upload resume if exists
+      if (formData.candidateResume) {
+        setUploadingResume(true);
+        resumeUrl = await uploadFileToGoogleDrive(formData.candidateResume, 'resume');
+        setUploadingResume(false);
+        toast.success('Resume uploaded successfully!');
+      }
+
+      // Create timestamp
+      const now = new Date();
+      const day = String(now.getDate()).padStart(2, '0');
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const year = now.getFullYear();
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+
+      const formattedTimestamp = `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+
+      const rowData = [
+        formattedTimestamp,
+        selectedItem.indentNo,
+        generatedCandidateNo,
+        selectedItem.post,
+        formData.candidateName,
+        formatDOB(formData.candidateDOB),
+        formData.candidatePhone,
+        formData.candidateEmail,
+        formData.previousCompany || '',
+        formData.jobExperience || '',
+        formData.department || '',
+        formData.previousPosition || '',
+        '',
+        formData.maritalStatus || '',
+        '',
+        photoUrl,
+        '',
+        formData.presentAddress || '',
+        formData.aadharNo || '',
+        resumeUrl,
+        formData.interviewDate || '',
+      ];
+
+      // Submit to ENQUIRY sheet
+      const enquiryResponse = await fetch(
+        'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            sheetName: 'ENQUIRY',
+            action: 'insert',
+            rowData: JSON.stringify(rowData)
+          }),
+        }
+      );
+
+      const enquiryResult = await enquiryResponse.json();
+
+      if (!enquiryResult.success) {
+        throw new Error(enquiryResult.error || 'ENQUIRY submission failed');
+      }
+
+      toast.success('Enquiry submitted successfully!');
+      setShowModal(false);
+      fetchAllData();
+
+    } catch (error) {
+      console.error('Submission error:', error);
+      toast.error(`Error: ${error.message}`);
+    } finally {
+      setSubmitting(false);
+      setUploadingPhoto(false);
+      setUploadingResume(false);
+    }
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -616,32 +629,26 @@ setEnquiryData(processedEnquiryData);
                       Prefer
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Number Of Post (Filled/Total)
+                      Number Of Enquiry
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Competition Date
                     </th>
-                    {/* In Pending tab table headers, add this th after Competition Date */}
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                   Planned
-                </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Planned
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {tableLoading ? (
+                  {!dataLoaded && filteredPendingData.length === 0 ? (
                     <tr>
-                      <td colSpan="8" className="px-6 py-12 text-center">
-                        <div className="flex justify-center flex-col items-center">
-                          <div className="w-6 h-6 border-4 border-indigo-500 border-dashed rounded-full animate-spin mb-2"></div>
-                          <span className="text-gray-600 text-sm">
-                            Loading pending enquiries...
-                          </span>
-                        </div>
+                      <td colSpan="9" className="px-6 py-4 text-center text-gray-500">
+                        Loading data...
                       </td>
                     </tr>
                   ) : filteredPendingData.length === 0 ? (
                     <tr>
-                      <td colSpan="8" className="px-6 py-12 text-center">
+                      <td colSpan="9" className="px-6 py-12 text-center">
                         <p className="text-gray-500">
                           No pending enquiries found.
                         </p>
@@ -715,8 +722,8 @@ setEnquiryData(processedEnquiryData);
                               : "-"}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {item.plannedDate ? formatDateForDisplay(item.plannedDate) : "-"}
-                        </td>
+                            {item.plannedDate ? formatDateForDisplay(item.plannedDate) : "-"}
+                          </td>
                         </tr>
                       );
                     })
@@ -767,15 +774,10 @@ setEnquiryData(processedEnquiryData);
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {tableLoading ? (
+                  {!dataLoaded && filteredHistoryData.length === 0 ? (
                     <tr>
-                      <td colSpan="11" className="px-6 py-12 text-center">
-                        <div className="flex justify-center flex-col items-center">
-                          <div className="w-6 h-6 border-4 border-indigo-500 border-dashed rounded-full animate-spin mb-2"></div>
-                          <span className="text-gray-600 text-sm">
-                            Loading enquiry history...
-                          </span>
-                        </div>
+                      <td colSpan="11" className="px-6 py-4 text-center text-gray-500">
+                        Loading data...
                       </td>
                     </tr>
                   ) : filteredHistoryData.length === 0 ? (
@@ -1171,7 +1173,6 @@ setEnquiryData(processedEnquiryData);
                     className="w-full border border-gray-300 border-opacity-30 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-gray-500"
                   />
                 </div>
-               
               </div>
 
               <div className="flex justify-end space-x-2 pt-4">
@@ -1183,6 +1184,20 @@ setEnquiryData(processedEnquiryData);
                 >
                   Cancel
                 </button>
+
+                {getEnquiryCountForIndent(selectedItem.indentNo) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleCancelRemainingPosts(
+                      selectedItem.indentNo, 
+                      selectedItem.numberOfPost, 
+                      getEnquiryCountForIndent(selectedItem.indentNo)
+                    )}
+                    className="px-4 py-2 text-white bg-red-600 rounded-md hover:bg-opacity-90"
+                  >
+                    Cancel ({getEnquiryCountForIndent(selectedItem.indentNo)}/{selectedItem.numberOfPost})
+                  </button>
+                )}
                 <button
                   type="submit"
                   className="px-4 py-2 text-white bg-indigo-700 rounded-md hover:bg-opacity-90 flex items-center justify-center"

@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { HistoryIcon, Plus, X } from 'lucide-react';
-import useDataStore from '../store/dataStore';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { HistoryIcon, Plus, X, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
+import * as XLSX from 'xlsx';
 
 const Indent = () => {
-  const { addIndent } = useDataStore();
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({
     post: '',
@@ -18,35 +17,119 @@ const Indent = () => {
     indentNumber: '',
     timestamp: '',
     experience: '',
+    enquiry: '',
   });
+  
   const [indentData, setIndentData] = useState([]);
   const [filteredIndentData, setFilteredIndentData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [tableLoading, setTableLoading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const dataFetchedRef = useRef(false);
 
-  useEffect(() => {
-    const loadData = async () => {
-      setTableLoading(true);
-      const result = await fetchIndentDataFromRow7();
-      if (result.success) {
-        console.log('Data from row 7:', result.data);
-        setIndentData(result.data);
-        // Filter out completed entries by default
-        const filtered = result.data.filter(item => 
-          !['Complete', 'complete', 'Completed', 'completed', 'COMPLETE'].includes(item.status)
-        );
-        setFilteredIndentData(filtered);
-      } else {
-        console.error('Error:', result.error);
+  // Memoized fetch function
+  const fetchIndentDataFromRow7 = useCallback(async () => {
+    try {
+      const response = await fetch(
+        'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=INDENT&action=fetch'
+      );
+      
+      const result = await response.json();
+      
+      if (result.success && result.data && result.data.length >= 7) {
+        const dataFromRow7 = result.data.slice(6);
+        const headers = result.data[5].map(h => h?.trim() || '');
+        
+        // Get column indices dynamically
+        const getColumnIndex = (headerName) => {
+          return headers.findIndex(h => 
+            h.toLowerCase().includes(headerName.toLowerCase())
+          );
+        };
+        
+        const timestampIndex = getColumnIndex('Timestamp');
+        const indentNumberIndex = getColumnIndex('Indent Number');
+        const postIndex = getColumnIndex('Post');
+        const genderIndex = getColumnIndex('Gender');
+        const departmentIndex = getColumnIndex('Department');
+        const preferIndex = getColumnIndex('Prefer');
+        const companyIndex = getColumnIndex('Company');
+        
+        // Fixed column indices based on structure
+        const noOFPostIndex = 6;
+        const completionDateIndex = 7;
+        const experienceIndex = 9;
+        const statusIndex = 10;
+        const planned1Index = 11;
+        const enquiryIndex = 19;
+        const pendingPostIndex = 21;
+        const totalJoinedIndex = 22;
+
+        const processedData = dataFromRow7.map(row => ({
+          timestamp: row[timestampIndex] || '',
+          indentNumber: row[indentNumberIndex] || '',
+          post: row[postIndex] || '',
+          gender: row[genderIndex] || '',
+          department: row[departmentIndex] || '',
+          prefer: row[preferIndex] || '',
+          company: row[companyIndex] || '',
+          noOfPost: row[noOFPostIndex] || '',
+          completionDate: row[completionDateIndex] || '',
+          experience: row[experienceIndex] || '',
+          status: row[statusIndex] || '',
+          planned1: row[planned1Index] || '',
+          enquiry: row[enquiryIndex] || '',
+          pendingPost: row[pendingPostIndex] || '',
+          totalJoined: row[totalJoinedIndex] || ''
+        }));
+        
+        return {
+          success: true,
+          data: processedData
+        };
       }
-      setTableLoading(false);
-    };
-    loadData();
+      return {
+        success: false,
+        error: 'Not enough rows in sheet data'
+      };
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
   }, []);
 
-  // Filter data when showCompleted state changes
+  // Load data on component mount
+  useEffect(() => {
+    if (dataFetchedRef.current) return;
+    
+    const loadData = async () => {
+      try {
+        const result = await fetchIndentDataFromRow7();
+        if (result.success) {
+          setIndentData(result.data);
+          // Initial filter - hide completed entries
+          const filtered = result.data.filter(item => 
+            !['Complete', 'complete', 'Completed', 'completed', 'COMPLETE'].includes(item.status)
+          );
+          setFilteredIndentData(filtered);
+        } else {
+          console.error('Error loading data:', result.error);
+        }
+      } catch (error) {
+        console.error('Error in loadData:', error);
+      } finally {
+        setIsInitialLoad(false);
+        dataFetchedRef.current = true;
+      }
+    };
+    
+    loadData();
+  }, [fetchIndentDataFromRow7]);
+
+  // Update filtered data when showCompleted changes
   useEffect(() => {
     if (showCompleted) {
       setFilteredIndentData(indentData);
@@ -58,125 +141,67 @@ const Indent = () => {
     }
   }, [showCompleted, indentData]);
 
-  const generateIndentNumber = async () => {
+  // Optimized Excel export
+  const exportToExcel = useCallback(() => {
     try {
-      const result = await fetchLastIndentNumber();
+      const dataToExport = filteredIndentData.length > 0 ? filteredIndentData : indentData;
       
-      if (result.success) {
-        const nextNumber = result.lastIndentNumber + 1;
-        return `REC-${String(nextNumber).padStart(2, '0')}`;
+      if (dataToExport.length === 0) {
+        toast.error('No data to export');
+        return;
       }
-      return 'REC-01';
+
+      const excelData = dataToExport.map((item, index) => ({
+        'S.No': index + 1,
+        'Indent Number': item.indentNumber || '',
+        'Company': item.company || '',
+        'Post': item.post || '',
+        'Gender': item.gender || '',
+        'Department': item.department || '',
+        'Prefer': item.prefer || '',
+        'Experience': item.experience || '',
+        'No. of Post': item.noOfPost || '',
+        'No. of Enquiry': item.enquiry || '',
+        'Pending Post': item.pendingPost || '',
+        'Total Joined': item.totalJoined || '',
+        'Completion Date': item.completionDate || '',
+        'Planned Date': item.planned1 || '',
+        'Status': item.status || 'Not Set'
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(excelData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Indent Data');
+      
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:]/g, '-');
+      const filename = `Indent_Data_${timestamp}.xlsx`;
+      
+      XLSX.writeFile(workbook, filename);
+      toast.success(`Exported ${dataToExport.length} records to Excel`);
     } catch (error) {
-      console.error('Error generating indent number:', error);
-      return 'REC-01';
+      console.error('Error exporting to Excel:', error);
+      toast.error('Failed to export to Excel');
     }
-  };
+  }, [filteredIndentData, indentData]);
 
-  const getCurrentTimestamp = () => {
-    const now = new Date();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const year = now.getFullYear();
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const seconds = String(now.getSeconds()).padStart(2, '0');
-
-    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
-  };
-
-  const fetchIndentDataFromRow7 = async () => {
+  // Generate indent number
+  const generateIndentNumber = useCallback(async () => {
     try {
       const response = await fetch(
         'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=INDENT&action=fetch'
       );
       
       const result = await response.json();
-      
-      if (result.success && result.data && result.data.length >= 7) {
-        const dataFromRow7 = result.data.slice(6);
-        const headers = result.data[5].map(h => h.trim());
-        
-        const timestampIndex = headers.indexOf('Timestamp');
-        const indentNumberIndex = headers.indexOf('Indent Number');
-        const postIndex = headers.indexOf('Post');
-        const genderIndex = headers.indexOf('Gender');
-        const departmentIndex = headers.indexOf('Department');
-        const preferIndex = headers.indexOf('Prefer');
-        const companyIndex = headers.indexOf('Company');
-        
-        const noOFPostIndex = 6;
-        const completionDateIndex = 7;
-        const experienceIndex = 9;
-        const statusIndex = 10;
-        const planned1Index = 11; // Planned 1 column index based on your screenshot
-
-        const processedData = dataFromRow7.map(row => ({
-          timestamp: row[timestampIndex],
-          indentNumber: row[indentNumberIndex],
-          post: row[postIndex],
-          gender: row[genderIndex],
-          department: row[departmentIndex],
-          prefer: row[preferIndex],
-          company: row[companyIndex],
-          noOfPost: row[noOFPostIndex],
-          completionDate: row[completionDateIndex],
-          experience: row[experienceIndex],
-
-          status: row[statusIndex] || '',
-          planned1: row[planned1Index] || '', // Add Planned 1 data
-
-        }));
-        
-        return {
-          success: true,
-          data: processedData,
-          headers: headers
-        };
-      } else {
-        return {
-          success: false,
-          error: 'Not enough rows in sheet data'
-        };
-      }
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  };
-
-  const fetchLastIndentNumber = async () => {
-    try {
-      const response = await fetch(
-        'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=INDENT&action=fetch'
-      );
-      
-      const result = await response.json();
-      console.log('Full sheet data:', result);
       
       if (result.success && result.data && result.data.length > 6) {
-        const headers = result.data[5].map(h => h ? h.trim().toLowerCase() : '');
-        console.log('Headers found:', headers);
-        
+        const headers = result.data[5].map(h => h?.trim().toLowerCase() || '');
         let indentNumberIndex = headers.indexOf('indent number');
-        if (indentNumberIndex === -1) {
-          indentNumberIndex = 1;
-        }
+        if (indentNumberIndex === -1) indentNumberIndex = 1;
         
-        console.log('Indent number column index:', indentNumberIndex);
-        
-        let lastIndentNumber = null;
         let maxNumericValue = 0;
-        
         for (let i = 6; i < result.data.length; i++) {
           const indentValue = result.data[i][indentNumberIndex];
-          
-          if (indentValue && indentValue.toString().trim() !== '') {
-            lastIndentNumber = indentValue;
-            
+          if (indentValue) {
             const match = indentValue.toString().match(/\d+/);
             if (match) {
               const numericValue = parseInt(match[0]);
@@ -187,49 +212,54 @@ const Indent = () => {
           }
         }
         
-        console.log('Last indent number found:', lastIndentNumber);
-        console.log('Max numeric value:', maxNumericValue);
-        
-        return {
-          success: true,
-          lastIndentNumber: maxNumericValue,
-          fullLastIndent: lastIndentNumber
-        };
-      } else {
-        return {
-          success: true,
-          lastIndentNumber: 0,
-          message: 'Sheet is empty or has insufficient data rows'
-        };
+        const nextNumber = maxNumericValue + 1;
+        return `REC-${String(nextNumber).padStart(2, '0')}`;
       }
+      return 'REC-01';
     } catch (error) {
-      console.error('Error in fetchLastIndentNumber:', error);
-      return {
-        success: false,
-        error: error.message,
-        lastIndentNumber: 0
-      };
+      console.error('Error generating indent number:', error);
+      return 'REC-01';
     }
-  };
+  }, []);
 
-  const handleInputChange = (e) => {
+  // Get current timestamp
+  const getCurrentTimestamp = useCallback(() => {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+  }, []);
+
+  // Format date for sheet
+  const formatDateForSheet = useCallback((dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '';
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const year = date.getFullYear();
+    return `${month}/${day}/${year}`;
+  }, []);
+
+  // Handle input change
+  const handleInputChange = useCallback((e) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
       [name]: value
     }));
-  };
+  }, []);
 
-  const handleSubmit = async (e) => {
+  // Handle form submission
+  const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
 
-    if (
-      !formData.post ||
-      !formData.gender ||
-      !formData.company ||
-      !formData.numberOfPost ||
-      !formData.competitionDate 
-    ) {
+    if (!formData.post || !formData.gender || !formData.company || 
+        !formData.numberOfPost || !formData.competitionDate) {
       toast.error('Please fill all required fields');
       return;
     }
@@ -244,27 +274,31 @@ const Indent = () => {
       const indentNumber = await generateIndentNumber();
       const timestamp = getCurrentTimestamp();
       const formattedDate = formatDateForSheet(formData.competitionDate);
-      console.log(indentNumber);
 
       const rowData = [
-  timestamp,
-  indentNumber,
-  formData.company,
-  formData.post,
-  formData.gender,
-  formData.prefer,
-  formData.numberOfPost,
-  formattedDate,
-  formData.department,
-  formData.prefer === 'Experience' ? formData.experience : "",
-  formData.status || "",
-  "", // Planned 1 - leave empty or set default
-  "", // Actual 1
-  "", // TL
-  "",
-  "",
-  "",
-];
+        timestamp,
+        indentNumber,
+        formData.company,
+        formData.post,
+        formData.gender,
+        formData.prefer || "Any",
+        formData.numberOfPost,
+        formattedDate,
+        formData.department,
+        formData.prefer === 'Experience' ? formData.experience : "",
+        formData.status || "",
+        "", // Planned 1
+        "", // Actual 1
+        "", // TL
+        "",
+        "",
+        "",
+        "",
+        "",
+        formData.enquiry || "",
+        "", // V - Pending Post
+        ""  // W - Total Joined
+      ];
 
       const response = await fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
         method: 'POST',
@@ -291,11 +325,11 @@ const Indent = () => {
           indentNumber: '',
           timestamp: '',
           experience: '',
+          enquiry: '',
         });
         setShowModal(false);
         
-        // Refresh the table data
-        setTableLoading(true);
+        // Refresh data silently
         const fetchResult = await fetchIndentDataFromRow7();
         if (fetchResult.success) {
           setIndentData(fetchResult.data);
@@ -308,7 +342,6 @@ const Indent = () => {
             setFilteredIndentData(fetchResult.data);
           }
         }
-        setTableLoading(false);
       } else {
         toast.error('Failed to insert: ' + (result.error || 'Unknown error'));
       }
@@ -318,18 +351,10 @@ const Indent = () => {
     } finally {
       setSubmitting(false);
     }
-  };
+  }, [formData, generateIndentNumber, getCurrentTimestamp, formatDateForSheet, fetchIndentDataFromRow7, showCompleted]);
 
-  const formatDateForSheet = (dateString) => {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    const year = date.getFullYear();
-    return `${month}/${day}/${year}`;
-  };
-
-  const handleCancel = () => {
+  // Handle cancel
+  const handleCancel = useCallback(() => {
     setFormData({
       post: '',
       gender: '',
@@ -341,15 +366,52 @@ const Indent = () => {
       indentNumber: '',
       timestamp: '',
       experience: '',
+      enquiry: '',
     });
     setShowModal(false);
-  };
+  }, []);
+
+  // Format date for display
+  const formatDisplayDate = useCallback((dateValue) => {
+    if (!dateValue) return "—";
+    
+    try {
+      // Check if it's already a formatted date string
+      if (typeof dateValue === 'string' && dateValue.includes('/')) {
+        const parts = dateValue.split(' ');
+        const datePart = parts[0];
+        const [day, month, year] = datePart.split('/');
+        if (day && month && year) return `${day}/${month}/${year}`;
+      }
+      
+      // Try to parse as Date object
+      const date = new Date(dateValue);
+      if (!date || isNaN(date.getTime())) return dateValue;
+      
+      const day = date.getDate().toString().padStart(2, "0");
+      const month = (date.getMonth() + 1).toString().padStart(2, "0");
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
+    } catch {
+      return dateValue;
+    }
+  }, []);
 
   return (
     <div className="space-y-6 page-content p-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-800">Indent</h1>
         <div className="flex items-center space-x-4">
+          <button
+            onClick={exportToExcel}
+            className="inline-flex items-center px-4 py-2 border border-green-600 rounded-md text-sm font-medium text-green-600 hover:bg-green-50 transition-all duration-200"
+            title="Export to Excel"
+          >
+            <Download size={16} className="mr-2" />
+            Export Excel
+          </button>
+
           <button
             onClick={() => setShowCompleted(!showCompleted)}
             className={`inline-flex items-center px-3 py-2 border rounded-md text-sm font-medium transition-all duration-200 ${
@@ -358,53 +420,19 @@ const Indent = () => {
                 : 'border-gray-300 text-gray-700 hover:bg-gray-50'
             }`}
           >
-            {showCompleted ? (
-              <>
-                <HistoryIcon size={16} className="mr-2" />
-                Showing All ({indentData.length})
-              </>
-            ) : (
-              <>
-                <HistoryIcon size={16} className="mr-2" />
-                Showing Active ({filteredIndentData.length}/{indentData.length})
-              </>
-            )}
+            <HistoryIcon size={16} className="mr-2" />
+            {showCompleted 
+              ? `Showing All (${indentData.length})` 
+              : `Showing Active (${filteredIndentData.length}/${indentData.length})`
+            }
           </button>
+          
           <button
             onClick={() => setShowModal(true)}
             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 transition-all duration-200"
-            disabled={loading}
           >
-            {loading ? (
-              <>
-                <svg
-                  className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  ></circle>
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                Loading...
-              </>
-            ) : (
-              <>
-                <Plus size={16} className="mr-2" />
-                Create Indent
-              </>
-            )}
+            <Plus size={16} className="mr-2" />
+            Create Indent
           </button>
         </div>
       </div>
@@ -425,6 +453,7 @@ const Indent = () => {
               </button>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              {/* Form fields remain the same */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Post*
@@ -500,8 +529,7 @@ const Indent = () => {
                   <option value="Store">Store</option>
                   <option value="Housekeeping">Housekeeping</option>
                   <option value="Technical">Technical</option>
-                 <option value ="Finance">Finance</option>
-
+                  <option value="Finance">Finance</option>
                 </select>
               </div>
 
@@ -540,7 +568,7 @@ const Indent = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Number Of Post*
+                  Number Of Enquiry*
                 </label>
                 <input
                   type="number"
@@ -548,9 +576,24 @@ const Indent = () => {
                   value={formData.numberOfPost}
                   onChange={handleInputChange}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="Enter number of posts"
+                  placeholder="Enter number of Enquiry"
                   min="1"
                   required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  No. of Post
+                </label>
+                <input
+                  type="number"
+                  name="enquiry"
+                  value={formData.enquiry}
+                  onChange={handleInputChange}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Enter number of Posts"
+                  min="0"
                 />
               </div>
 
@@ -637,6 +680,7 @@ const Indent = () => {
         </div>
       </div>
 
+      {/* Table */}
       <div className="bg-white shadow-lg rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <div className="max-h-[calc(100vh-300px)] overflow-y-auto">
@@ -665,13 +709,22 @@ const Indent = () => {
                     Experience
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    No. of Enquiry
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     No. of Post
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Pending Post
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Total Joined
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Completion Date
                   </th>
-                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Planned Date
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Planned Date
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Status
@@ -679,123 +732,84 @@ const Indent = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 bg-white">
-  {tableLoading ? (
-    <tr>
-      <td colSpan="11" className="px-6 py-12 text-center">
-        <div className="flex justify-center flex-col items-center">
-          <div className="w-6 h-6 border-4 border-blue-500 border-dashed rounded-full animate-spin mb-2"></div>
-          <span className="text-gray-600 text-sm">
-            Loading indent data...
-          </span>
-        </div>
-      </td>
-    </tr>
-  ) : filteredIndentData.length === 0 ? (
-    <tr>
-      <td colSpan="11" className="px-6 py-12 text-center">
-        <p className="text-gray-500">
-          {showCompleted ? 'No indent data found.' : 'No active indent data found.'}
-        </p>
-      </td>
-    </tr>
-  ) : (
-    filteredIndentData.map((item, index) => (
-      <tr key={index} className="hover:bg-gray-50">
-        <td className="px-6 py-4 whitespace-nowrap">
-          {item.indentNumber}
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-          {item.company}
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-          {item.post}
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-          {item.gender}
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-          {item.department}
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-          {item.prefer}
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-          {item.experience}
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-          {item.noOfPost}
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-          <div className="text-sm text-gray-900 break-words">
-            {item.completionDate
-              ? (() => {
-                  const date = new Date(item.completionDate);
-                  if (!date || isNaN(date.getTime()))
-                    return "Invalid date";
-                  const day = date
-                    .getDate()
-                    .toString()
-                    .padStart(2, "0");
-                  const month = (date.getMonth() + 1)
-                    .toString()
-                    .padStart(2, "0");
-                  const year = date.getFullYear();
-                  return `${day}/${month}/${year}`;
-                })()
-              : "—"}
-          </div>
-        </td>
-        {/* Add this cell for Planned Date */}
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-          <div className="text-sm text-gray-900 break-words">
-            {item.planned1
-              ? (() => {
-                  const dateStr = item.planned1;
-                  // Check if it's already a formatted date string
-                  if (dateStr.includes('/') && dateStr.includes(':')) {
-                    // Format: "11/12/2025 16:39:28"
-                    const datePart = dateStr.split(' ')[0];
-                    const [day, month, year] = datePart.split('/');
-                    return `${day}/${month}/${year}`;
-                  }
-                  // Try to parse as Date object
-                  const date = new Date(dateStr);
-                  if (!date || isNaN(date.getTime()))
-                    return dateStr || "—";
-                  const day = date
-                    .getDate()
-                    .toString()
-                    .padStart(2, "0");
-                  const month = (date.getMonth() + 1)
-                    .toString()
-                    .padStart(2, "0");
-                  const year = date.getFullYear();
-                  return `${day}/${month}/${year}`;
-                })()
-              : "—"}
-          </div>
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap">
-          <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-            !item.status || item.status === '' 
-              ? 'bg-gray-100 text-gray-800' 
-              : item.status === 'NeedMore' 
-              ? 'bg-yellow-100 text-yellow-800'
-              : item.status === 'Fulfilled'
-              ? 'bg-green-100 text-green-800'
-              : item.status === 'InProgress'
-              ? 'bg-blue-100 text-blue-800'
-              : ['Complete', 'complete', 'Completed', 'completed', 'COMPLETE'].includes(item.status)
-              ? 'bg-purple-100 text-purple-800'
-              : 'bg-gray-100 text-gray-800'
-          }`}>
-            {item.status || 'Not Set'}
-          </span>
-        </td>
-      </tr>
-    ))
-  )}
-</tbody>
+                {isInitialLoad ? (
+                  // Minimal loading indicator - only shows briefly if any
+                  <tr>
+                    <td colSpan="14" className="px-6 py-8 text-center text-gray-500 text-sm">
+                      Loading indent data...
+                    </td>
+                  </tr>
+                ) : filteredIndentData.length === 0 ? (
+                  <tr>
+                    <td colSpan="14" className="px-6 py-12 text-center">
+                      <p className="text-gray-500">
+                        {showCompleted ? 'No indent data found.' : 'No active indent data found.'}
+                      </p>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredIndentData.map((item, index) => (
+                    <tr key={`${item.indentNumber}-${index}`} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap font-medium">
+                        {item.indentNumber || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {item.company || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {item.post || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {item.gender || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {item.department || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {item.prefer || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {item.experience || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {item.noOfPost || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {item.enquiry || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {item.pendingPost || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {item.totalJoined || '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {formatDisplayDate(item.completionDate)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {formatDisplayDate(item.planned1)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                          !item.status || item.status === '' 
+                            ? 'bg-gray-100 text-gray-800' 
+                            : item.status === 'NeedMore' 
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : item.status === 'Fulfilled'
+                            ? 'bg-green-100 text-green-800'
+                            : item.status === 'InProgress'
+                            ? 'bg-blue-100 text-blue-800'
+                            : ['Complete', 'complete', 'Completed', 'completed', 'COMPLETE'].includes(item.status)
+                            ? 'bg-purple-100 text-purple-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {item.status || 'Not Set'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
             </table>
           </div>
         </div>

@@ -1516,7 +1516,7 @@ const Dashboard = () => {
         <div className="bg-white rounded-xl shadow-lg border p-6">
           <h2 className="text-lg font-bold text-gray-800 mb-6 flex items-center">
             <Users size={20} className="mr-2" />
-            Gender Distribution
+            Gender Distribution 
           </h2>
           <div className="h-80">
             {genderDistributionData.length > 0 ? (

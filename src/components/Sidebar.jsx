@@ -2275,16 +2275,10 @@ if (!document.getElementById('sidebar-scroll-prevention')) {
     badge: pendingLeaveCount > 0 ? pendingLeaveCount : null // Add this
   },
   
-  {
-    type: 'dropdown',
-    icon: Book,
+  { path: '/attendance',
+    icon:  BookPlus,
     label: 'Attendance',
-    isOpen: attendanceOpen,
-    toggle: () => setAttendanceOpen(!attendanceOpen),
-    items: [
-      { path: '/attendance', label: 'Monthly' },
-      { path: '/attendancedaily', label: 'Daily' }
-    ]
+    // badge: attendanceIssuesCount > 0 ? attendanceIssuesCount : null // Add this    
   },
   { 
     path: '/payroll', 
@@ -2295,7 +2289,7 @@ if (!document.getElementById('sidebar-scroll-prevention')) {
   {
     path: 'makepayment',
     icon: CreditCard,
-    label: 'Make Payment',
+    label: 'Leaving Payment',
     badge: pendingPayrollCount > 0 ? pendingPayrollCount : null // Add this
   }
 ,
@@ -2323,6 +2317,11 @@ if (!document.getElementById('sidebar-scroll-prevention')) {
     badge: siesEmployeesCount > 0 ? siesEmployeesCount : null // Add this
   },
 
+  { path: '/hr-policy', 
+    icon: FileText, 
+    label: 'HR Policy' ,
+  },
+
 ];
 
 
@@ -2333,6 +2332,7 @@ if (!document.getElementById('sidebar-scroll-prevention')) {
     // { path: '/gate-pass-request', icon: DoorOpen, label: 'Gate Pass Request' },
     { path: '/my-salary', icon: DollarSign, label: 'My Salary' },
     { path: '/company-calendar', icon: Calendar, label: 'Company Calendar' },
+
   ];
 
   const menuItems = user?.Admin === 'Yes' ? adminMenuItems : employeeMenuItems;

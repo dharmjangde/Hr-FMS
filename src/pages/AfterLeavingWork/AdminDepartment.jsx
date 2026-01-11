@@ -11,8 +11,6 @@ const AdminDepartment = () => {
   const [pendingData, setPendingData] = useState([]);
   const [historyData, setHistoryData] = useState([]);
   const [advanceData, setAdvanceData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [tableLoading, setTableLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   
@@ -34,10 +32,6 @@ const AdminDepartment = () => {
   const [selectedDepartment, setSelectedDepartment] = useState('admin'); // Which department form to show
 
   const fetchJoiningData = async () => {
-    setLoading(true);
-    setTableLoading(true);
-    setError(null);
-
     try {
       // Fetch both JOINING and Advance data in parallel
       const [joiningResponse, advanceResponse] = await Promise.all([
@@ -173,9 +167,6 @@ const AdminDepartment = () => {
       console.error('Error fetching joining data:', error);
       setError(error.message);
       toast.error(`Failed to load data: ${error.message}`);
-    } finally {
-      setLoading(false);
-      setTableLoading(false);
     }
   };
 
@@ -626,19 +617,8 @@ const formatDateForDisplay = (dateString) => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white">
-  {tableLoading ? (
+  {error ? (
     <tr>
-      {/* Update colSpan from 10 to 11 */}
-      <td colSpan="11" className="px-6 py-12 text-center">
-        <div className="flex justify-center flex-col items-center">
-          <div className="w-6 h-6 border-4 border-orange-500 border-dashed rounded-full animate-spin mb-2"></div>
-          <span className="text-gray-600 text-sm">Loading pending requests...</span>
-        </div>
-      </td>
-    </tr>
-  ) : error ? (
-    <tr>
-      {/* Update colSpan from 10 to 11 */}
       <td colSpan="11" className="px-6 py-12 text-center">
         <p className="text-red-500">Error: {error}</p>
         <button 
@@ -649,7 +629,8 @@ const formatDateForDisplay = (dateString) => {
         </button>
       </td>
     </tr>
-  ) : filteredPendingData.map((item, index) => (
+  ) : filteredPendingData.length > 0 ? (
+    filteredPendingData.map((item, index) => (
     <tr key={index} className="hover:bg-gray-50">
       <td className="px-6 py-4 whitespace-nowrap">
         <button
@@ -694,14 +675,16 @@ const formatDateForDisplay = (dateString) => {
         )}
       </td>
     </tr>
-  ))}
+  ))
+  ) : (
+    <tr>
+      <td colSpan="11" className="px-6 py-12 text-center">
+        <p className="text-gray-500">No pending requests found.</p>
+      </td>
+    </tr>
+  )}
 </tbody>
               </table>
-              {!tableLoading && filteredPendingData.length === 0 && (
-                <div className="px-6 py-12 text-center">
-                  <p className="text-gray-500">No pending requests found.</p>
-                </div>
-              )}
             </div>
           )}
 
@@ -723,16 +706,7 @@ const formatDateForDisplay = (dateString) => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white">
-                  {tableLoading ? (
-                    <tr>
-                      <td colSpan="10" className="px-6 py-12 text-center">
-                        <div className="flex justify-center flex-col items-center">
-                          <div className="w-6 h-6 border-4 border-orange-500 border-dashed rounded-full animate-spin mb-2"></div>
-                          <span className="text-gray-600 text-sm">Loading history...</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : error ? (
+                  {error ? (
                     <tr>
                       <td colSpan="10" className="px-6 py-12 text-center">
                         <p className="text-red-500">Error: {error}</p>
@@ -744,7 +718,8 @@ const formatDateForDisplay = (dateString) => {
                         </button>
                       </td>
                     </tr>
-                  ) : filteredHistoryData.map((item, index) => (
+                  ) : filteredHistoryData.length > 0 ? (
+                    filteredHistoryData.map((item, index) => (
                     <tr key={index} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeColor(item.departmentType)}`}>
@@ -776,14 +751,16 @@ const formatDateForDisplay = (dateString) => {
                          (item.storeSummary || '-')}
                       </td>
                     </tr>
-                  ))}
+                  ))
+                  ) : (
+                    <tr>
+                      <td colSpan="10" className="px-6 py-12 text-center">
+                        <p className="text-gray-500">No history found.</p>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
-              {!tableLoading && filteredHistoryData.length === 0 && (
-                <div className="px-6 py-12 text-center">
-                  <p className="text-gray-500">No history found.</p>
-                </div>
-              )}
             </div>
           )}
         </div>

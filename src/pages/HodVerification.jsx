@@ -10,8 +10,6 @@ const Leaving = () => {
   const [selectedItem, setSelectedItem] = useState(null);
   const [pendingData, setPendingData] = useState([]);
   const [historyData, setHistoryData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [tableLoading, setTableLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [formData, setFormData] = useState({
@@ -20,10 +18,6 @@ const Leaving = () => {
   });
 
   const fetchJoiningData = async () => {
-    setLoading(true);
-    setTableLoading(true);
-    setError(null);
-
     try {
       const response = await fetch(
         'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=JOINING&action=fetch'
@@ -91,9 +85,6 @@ const Leaving = () => {
       console.error('Error fetching joining data:', error);
       setError(error.message);
       toast.error(`Failed to load joining data: ${error.message}`);
-    } finally {
-      setLoading(false);
-      setTableLoading(false);
     }
   };
 
@@ -341,18 +332,9 @@ const Leaving = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white">
-                  {tableLoading ? (
+                  {error ? (
                     <tr>
-                      <td colSpan="8" className="px-6 py-12 text-center">
-                        <div className="flex justify-center flex-col items-center">
-                          <div className="w-6 h-6 border-4 border-indigo-500 border-dashed rounded-full animate-spin mb-2"></div>
-                          <span className="text-gray-600 text-sm">Loading pending requests...</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : error ? (
-                    <tr>
-                      <td colSpan="8" className="px-6 py-12 text-center">
+                      <td colSpan="9" className="px-6 py-12 text-center">
                         <p className="text-red-500">Error: {error}</p>
                         <button 
                           onClick={fetchJoiningData}
@@ -362,7 +344,8 @@ const Leaving = () => {
                         </button>
                       </td>
                     </tr>
-                  ) : filteredPendingData.map((item, index) => (
+                  ) : filteredPendingData.length > 0 ? (
+                    filteredPendingData.map((item, index) => (
                     <tr key={index} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <button
@@ -385,14 +368,16 @@ const Leaving = () => {
                {item.columnBG || '-'}
               </td>
                     </tr>
-                  ))}
+                  ))
+                  ) : (
+                    <tr>
+                      <td colSpan="9" className="px-6 py-12 text-center">
+                        <p className="text-gray-500">No pending requests found.</p>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
-              {!tableLoading && filteredPendingData.length === 0 && (
-                <div className="px-6 py-12 text-center">
-                  <p className="text-gray-500">No pending requests found.</p>
-                </div>
-              )}
             </div>
           )}
 
@@ -413,16 +398,7 @@ const Leaving = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white">
-                  {tableLoading ? (
-                    <tr>
-                      <td colSpan="8" className="px-6 py-12 text-center">
-                        <div className="flex justify-center flex-col items-center">
-                          <div className="w-6 h-6 border-4 border-indigo-500 border-dashed rounded-full animate-spin mb-2"></div>
-                          <span className="text-gray-600 text-sm">Loading history...</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : error ? (
+                  {error ? (
                     <tr>
                       <td colSpan="8" className="px-6 py-12 text-center">
                         <p className="text-red-500">Error: {error}</p>
@@ -434,7 +410,8 @@ const Leaving = () => {
                         </button>
                       </td>
                     </tr>
-                  ) : filteredHistoryData.map((item, index) => (
+                  ) : filteredHistoryData.length > 0 ? (
+                    filteredHistoryData.map((item, index) => (
                     <tr key={index} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.employeeCode}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.employeeNo}</td>
@@ -456,14 +433,16 @@ const Leaving = () => {
                       </td>
                     
                     </tr>
-                  ))}
+                  ))
+                  ) : (
+                    <tr>
+                      <td colSpan="8" className="px-6 py-12 text-center">
+                        <p className="text-gray-500">No history found.</p>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
-              {!tableLoading && filteredHistoryData.length === 0 && (
-                <div className="px-6 py-12 text-center">
-                  <p className="text-gray-500">No history found.</p>
-                </div>
-              )}
             </div>
           )}
         </div>

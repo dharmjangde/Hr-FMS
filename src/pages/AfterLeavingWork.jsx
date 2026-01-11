@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Search, X } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -8,8 +7,6 @@ const AfterLeavingWork = () => {
   const [showModal, setShowModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [pendingData, setPendingData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [tableLoading, setTableLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [formData, setFormData] = useState({
@@ -17,10 +14,6 @@ const AfterLeavingWork = () => {
   });
 
   const fetchLeavingData = async () => {
-    setLoading(true);
-    setTableLoading(true);
-    setError(null);
-
     try {
       const response = await fetch(
         'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=LEAVING&action=fetch'
@@ -74,9 +67,6 @@ const AfterLeavingWork = () => {
       console.error('Error fetching leaving data:', error);
       setError(error.message);
       toast.error(`Failed to load leaving data: ${error.message}`);
-    } finally {
-      setLoading(false);
-      setTableLoading(false);
     }
   };
 
@@ -91,7 +81,6 @@ const AfterLeavingWork = () => {
     
     setSelectedItem(item);
     setShowModal(true);
-    setLoading(true);
 
     try {
       const fullDataResponse = await fetch(
@@ -140,8 +129,6 @@ const AfterLeavingWork = () => {
     } catch (error) {
       console.error('Error fetching current values:', error);
       toast.error("Failed to load current values");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -154,7 +141,6 @@ const AfterLeavingWork = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
     setSubmitting(true);
 
     if (!selectedItem.employeeId || !selectedItem.name) {
@@ -261,7 +247,6 @@ const AfterLeavingWork = () => {
       console.error('Update error:', error);
       toast.error(`Update failed: ${error.message}`);
     } finally {
-      setLoading(false);
       setSubmitting(false);
     }
   };
@@ -312,16 +297,7 @@ const AfterLeavingWork = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white">
-                {tableLoading ? (
-                  <tr>
-                    <td colSpan="8" className="px-6 py-12 text-center">
-                      <div className="flex justify-center flex-col items-center">
-                        <div className="w-6 h-6 border-4 border-indigo-500 border-dashed rounded-full animate-spin mb-2"></div>
-                        <span className="text-gray-600 text-sm">Loading pending tasks...</span>
-                      </div>
-                    </td>
-                  </tr>
-                ) : error ? (
+                {error ? (
                   <tr>
                     <td colSpan="8" className="px-6 py-12 text-center">
                       <p className="text-red-500">Error: {error}</p>

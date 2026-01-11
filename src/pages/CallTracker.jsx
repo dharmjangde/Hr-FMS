@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Clock, CheckCircle, X, Upload, PauseCircle, RefreshCw, Calendar } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Search, Clock, CheckCircle, X, Upload, PauseCircle, RefreshCw, Calendar, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
+import * as XLSX from 'xlsx';
 
 const CallTracker = () => {
   const [activeTab, setActiveTab] = useState('pending');
@@ -8,24 +9,171 @@ const CallTracker = () => {
   const [showModal, setShowModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [followUpData, setFollowUpData] = useState([]);
-
   const [submitting, setSubmitting] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  
   const [formData, setFormData] = useState({
     candidateSays: '',
     status: '',
     nextDate: ''
   });
-  const [loading, setLoading] = useState(false);
-  const [tableLoading, setTableLoading] = useState(false);
+  
   const [enquiryData, setEnquiryData] = useState([]);
   const [historyData, setHistoryData] = useState([]);
-  const [error, setError] = useState(null);
 
-  const fetchEnquiryData = async () => {
-    setLoading(true);
-    setTableLoading(true);
-    setError(null);
+  // Add export functionality
+  const exportToExcel = () => {
+    try {
+      let dataToExport = [];
+      let filename = '';
 
+      // Determine which data to export based on active tab
+      switch (activeTab) {
+        case 'pending':
+          dataToExport = pendingData.filter(item => {
+            const matchesSearch = item.candidateName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              item.candidateEnquiryNo?.toLowerCase().includes(searchTerm.toLowerCase());
+            return matchesSearch;
+          });
+          filename = 'Pending_Calls_Data';
+          break;
+        case 'followup':
+          dataToExport = historyData.filter(item => 
+            item.status === "Follow-up"
+          ).filter(item => {
+            const matchesSearch = item.enquiryNo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                item.candidateSays?.toLowerCase().includes(searchTerm.toLowerCase());
+            return matchesSearch;
+          });
+          filename = 'FollowUp_Calls_Data';
+          break;
+        case 'interview':
+          dataToExport = historyData.filter(item => item.status === "Interview").filter(item => {
+            const matchesSearch = item.enquiryNo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                item.candidateSays?.toLowerCase().includes(searchTerm.toLowerCase());
+            return matchesSearch;
+          });
+          filename = 'Interview_Calls_Data';
+          break;
+        case 'onhold':
+          dataToExport = historyData.filter(item => item.status === "On Hold").filter(item => {
+            const matchesSearch = item.enquiryNo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                item.candidateSays?.toLowerCase().includes(searchTerm.toLowerCase());
+            return matchesSearch;
+          });
+          filename = 'OnHold_Calls_Data';
+          break;
+        case 'history':
+          dataToExport = historyData.filter(item => 
+            item.status === "Joining" || 
+            item.status === "Reject" ||
+            item.status === "Negotiation"
+          ).filter(item => {
+            const matchesSearch = item.enquiryNo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                item.candidateSays?.toLowerCase().includes(searchTerm.toLowerCase());
+            return matchesSearch;
+          });
+          filename = 'History_Calls_Data';
+          break;
+        default:
+          dataToExport = [];
+          filename = 'CallTracker_Data';
+      }
+      
+      if (dataToExport.length === 0) {
+        toast.error(`No data to export in ${activeTab} tab`);
+        return;
+      }
+
+      // Prepare data for Excel based on active tab
+      let excelData = [];
+      
+      if (activeTab === 'pending') {
+        excelData = dataToExport.map((item, index) => ({
+          'S.No': index + 1,
+          'Indent No.': item.indentNo || '',
+          'Candidate Enquiry No.': item.candidateEnquiryNo || '',
+          'Applying For Post': item.applyingForPost || '',
+          'Department': item.department || '',
+          'Candidate Name': item.candidateName || '',
+          'Phone': item.candidatePhone || '',
+          'Email': item.candidateEmail || '',
+          'Planned Date': formatDateForExport(item.plannedDate) || '',
+          'Previous Company': item.previousCompany || '',
+          'Job Experience': item.jobExperience || '',
+          'Last Salary': item.lastSalary || '',
+          'Previous Position': item.previousPosition || '',
+          'Reason for Leaving': item.reasonForLeaving || '',
+          'Marital Status': item.maritalStatus || '',
+          'Last Employer Mobile': item.lastEmployerMobile || '',
+          'Reference By': item.referenceBy || '',
+          'Present Address': item.presentAddress || '',
+          'Aadhar No': item.aadharNo || '',
+          'Photo': item.candidatePhoto || '',
+          'Resume': item.candidateResume || ''
+        }));
+      } else {
+        // For other tabs (followup, interview, onhold, history)
+        excelData = dataToExport.map((item, index) => ({
+          'S.No': index + 1,
+          'Indent No': item.indentNo || '',
+          'Enquiry No': item.enquiryNo || '',
+          'Status': item.status || '',
+          'Details': item.candidateSays || '',
+          'Next Date': formatDateForExport(item.nextDate) || '',
+          'Timestamp': item.timestamp || ''
+        }));
+      }
+
+      // Create worksheet
+      const worksheet = XLSX.utils.json_to_sheet(excelData);
+      
+      // Create workbook
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'CallTracker Data');
+      
+      // Auto-size columns
+      const maxWidth = excelData.reduce((w, r) => Math.max(w, Object.keys(r).length), 10);
+      worksheet['!cols'] = Array.from({ length: maxWidth }, () => ({ width: 20 }));
+      
+      // Generate filename with timestamp
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:]/g, '-');
+      const finalFilename = `${filename}_${timestamp}.xlsx`;
+      
+      // Export to Excel
+      XLSX.writeFile(workbook, finalFilename);
+      
+      toast.success(`Exported ${dataToExport.length} ${activeTab} records to Excel`);
+    } catch (error) {
+      console.error('Error exporting to Excel:', error);
+      toast.error('Failed to export to Excel');
+    }
+  };
+
+  // Helper function for date formatting in export
+  const formatDateForExport = (dateString) => {
+    if (!dateString || dateString.trim() === '') return '';
+    
+    try {
+      if (dateString.includes('/')) {
+        return dateString;
+      }
+      
+      const date = new Date(dateString);
+      if (date && !isNaN(date.getTime())) {
+        const day = date.getDate().toString().padStart(2, '0');
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}/${month}/${year}`;
+      }
+      
+      return dateString;
+    } catch (error) {
+      return dateString;
+    }
+  };
+
+  const fetchAllData = useCallback(async () => {
     try {
       const [enquiryResponse, followUpResponse, indentResponse] = await Promise.all([
         fetch(
@@ -39,25 +187,11 @@ const CallTracker = () => {
         ),
       ]);
 
-      if (!enquiryResponse.ok || !followUpResponse.ok || !indentResponse.ok) {
-        throw new Error(`HTTP error!`);
-      }
-
       const [enquiryResult, followUpResult, indentResult] = await Promise.all([
         enquiryResponse.json(),
         followUpResponse.json(),
         indentResponse.json(),
       ]);
-
-      if (
-        !enquiryResult.success ||
-        !enquiryResult.data ||
-        enquiryResult.data.length < 7
-      ) {
-        throw new Error(
-          enquiryResult.error || "Not enough rows in enquiry sheet data"
-        );
-      }
 
       // Process INDENT data to create a lookup map
       let indentDepartmentMap = {};
@@ -65,11 +199,9 @@ const CallTracker = () => {
         const indentHeaders = indentResult.data[5].map(h => h.trim());
         const indentDataRows = indentResult.data.slice(6);
 
-        const getIndentIndex = (headerName) => indentHeaders.findIndex(h => h === headerName);
-
         indentDataRows.forEach(row => {
-          const indentNo = row[getIndentIndex('Indent Number')];
-          const department = row[8]; // Column I (index 8)
+          const indentNo = row[indentHeaders.findIndex(h => h === 'Indent Number')];
+          const department = row[8];
           if (indentNo) {
             indentDepartmentMap[indentNo] = department || '';
           }
@@ -77,135 +209,98 @@ const CallTracker = () => {
       }
 
       // Process enquiry data
-      const enquiryHeaders = enquiryResult.data[5].map((h) => h.trim());
-      const enquiryDataFromRow7 = enquiryResult.data.slice(6);
+      if (enquiryResult.success && enquiryResult.data && enquiryResult.data.length >= 7) {
+        const enquiryHeaders = enquiryResult.data[5].map((h) => h.trim());
+        const enquiryDataFromRow7 = enquiryResult.data.slice(6);
 
-      const getIndex = (headerName) =>
-        enquiryHeaders.findIndex((h) => h === headerName);
+        const getIndex = (headerName) =>
+          enquiryHeaders.findIndex((h) => h === headerName);
 
-      const processedEnquiryData = enquiryDataFromRow7
-        .filter((row) => {
-          const plannedIndex = getIndex("Planned");
-          const actualIndex = getIndex("Actual");
-          const planned = row[plannedIndex];
-          const actual = row[actualIndex];
-          return planned && (!actual || actual === "");
-        })
-        .map((row) => {
-          const indentNo = row[getIndex("Indent Number")];
-          const departmentFromIndent = indentDepartmentMap[indentNo] || '';
+        const processedEnquiryData = enquiryDataFromRow7
+          .filter((row) => {
+            const plannedIndex = getIndex("Planned");
+            const actualIndex = getIndex("Actual");
+            const planned = row[plannedIndex];
+            const actual = row[actualIndex];
+            return planned && (!actual || actual === "");
+          })
+          .map((row) => {
+            const indentNo = row[getIndex("Indent Number")];
+            const departmentFromIndent = indentDepartmentMap[indentNo] || '';
 
-          return {
-            id: row[getIndex("Timestamp")],
-            indentNo: indentNo,
-            candidateEnquiryNo: row[getIndex("Candidate Enquiry Number")],
-            applyingForPost: row[getIndex("Applying For the Post")],
-            department: departmentFromIndent,
-            plannedDate: row[getIndex("Planned")] || '', // Column V - Planned date
-            candidateName: row[getIndex("Candidate Name")],
-            candidateDOB: row[getIndex("DOB")],
-            candidatePhone: row[getIndex("Candidate Phone Number")],
-            candidateEmail: row[getIndex("Candidate Email")],
-            previousCompany: row[getIndex("Previous Company Name")],
-            jobExperience: row[getIndex("Job Experience")] || "",
-            lastSalary: row[getIndex("Last Salary Drawn")] || "",
-            previousPosition: row[getIndex("Previous Position")] || "",
-            reasonForLeaving:
-              row[getIndex("Reason Of Leaving Previous Company")] || "",
-            maritalStatus: row[getIndex("Marital Status")] || "",
-            lastEmployerMobile: row[getIndex("Last Employer Mobile Number")] || "",
-            candidatePhoto: row[getIndex("Candidate Photo")] || "",
-            candidateResume: row[19] || "",
-            referenceBy: row[getIndex("Reference By")] || "",
-            presentAddress: row[getIndex("Present Address")] || "",
-            aadharNo: row[getIndex("Aadhar Number")] || "",
-            designation: row[getIndex("Applying For the Post")] || "",
-          };
-        });
+            return {
+              id: row[getIndex("Timestamp")],
+              indentNo: indentNo,
+              candidateEnquiryNo: row[getIndex("Candidate Enquiry Number")],
+              applyingForPost: row[getIndex("Applying For the Post")],
+              department: departmentFromIndent,
+              plannedDate: row[getIndex("Planned")] || '',
+              candidateName: row[getIndex("Candidate Name")],
+              candidateDOB: row[getIndex("DOB")],
+              candidatePhone: row[getIndex("Candidate Phone Number")],
+              candidateEmail: row[getIndex("Candidate Email")],
+              previousCompany: row[getIndex("Previous Company Name")],
+              jobExperience: row[getIndex("Job Experience")] || "",
+              lastSalary: row[getIndex("Last Salary Drawn")] || "",
+              previousPosition: row[getIndex("Previous Position")] || "",
+              reasonForLeaving:
+                row[getIndex("Reason Of Leaving Previous Company")] || "",
+              maritalStatus: row[getIndex("Marital Status")] || "",
+              lastEmployerMobile: row[getIndex("Last Employer Mobile Number")] || "",
+              candidatePhoto: row[getIndex("Candidate Photo")] || "",
+              candidateResume: row[19] || "",
+              referenceBy: row[getIndex("Reference By")] || "",
+              presentAddress: row[getIndex("Present Address")] || "",
+              aadharNo: row[getIndex("Aadhar Number")] || "",
+              designation: row[getIndex("Applying For the Post")] || "",
+            };
+          });
 
-      setEnquiryData(processedEnquiryData);
+        setEnquiryData(processedEnquiryData);
 
-      // Process follow-up data
-      if (followUpResult.success && followUpResult.data) {
-        const rawFollowUpData = followUpResult.data || followUpResult;
-        const followUpRows = Array.isArray(rawFollowUpData[0])
-          ? rawFollowUpData.slice(1)
-          : rawFollowUpData;
+        // Process follow-up data
+        if (followUpResult.success && followUpResult.data) {
+          const rawFollowUpData = followUpResult.data || followUpResult;
+          const followUpRows = Array.isArray(rawFollowUpData[0])
+            ? rawFollowUpData.slice(1)
+            : rawFollowUpData;
 
-        const processedFollowUpData = followUpRows.map((row) => ({
-          enquiryNo: row[1] || "",
-          status: row[2] || "",
-        }));
+          const processedFollowUpData = followUpRows.map((row) => ({
+            enquiryNo: row[1] || "",
+            status: row[2] || "",
+          }));
 
-        setFollowUpData(processedFollowUpData);
+          setFollowUpData(processedFollowUpData);
+        }
       }
+
+      // Process follow-up history data
+      if (followUpResult.success) {
+        const rawData = followUpResult.data || followUpResult;
+        if (Array.isArray(rawData)) {
+          const dataRows = rawData.length > 0 && Array.isArray(rawData[0]) ? rawData.slice(1) : rawData;
+          const processedData = dataRows.map(row => ({
+            timestamp: row[0] || '',
+            indentNo: row[1] || '',
+            enquiryNo: row[2] || '',
+            status: row[3] || '',
+            candidateSays: row[4] || '',
+            nextDate: row[5] || ''
+          }));
+          setHistoryData(processedData);
+        }
+      }
+
+      setDataLoaded(true);
     } catch (error) {
       console.error("Error fetching data:", error);
-      setError(error.message);
       toast.error("Failed to fetch data");
-    } finally {
-      setLoading(false);
-      setTableLoading(false);
     }
-  };
-
-  const fetchFollowUpData = async () => {
-    setLoading(true);
-    setTableLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch(
-        'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=Follow - Up&action=fetch'
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      console.log('Raw API response:', result);
-
-      if (!result.success) {
-        throw new Error(result.error || 'Google Script returned an error');
-      }
-
-      // Handle both array formats (direct data or result.data)
-      const rawData = result.data || result;
-
-      if (!Array.isArray(rawData)) {
-        throw new Error('Expected array data not received');
-      }
-
-      // Process data - skip header row if present
-      const dataRows = rawData.length > 0 && Array.isArray(rawData[0]) ? rawData.slice(1) : rawData;
-
-      const processedData = dataRows.map(row => ({
-        timestamp: row[0] || '',       // Column A - Timestamp
-        indentNo: row[1] || '',        // Column B - Indent No (NEW)
-        enquiryNo: row[2] || '',       // Column C - Enquiry No
-        status: row[3] || '',          // Column D - Status
-        candidateSays: row[4] || '',   // Column E - Candidates Says
-        nextDate: row[5] || ''         // Column F - Next Date
-      }));
-
-      console.log('Processed follow-up data:', processedData);
-      setHistoryData(processedData);
-
-    } catch (error) {
-      console.error('Error in fetchFollowUpData:', error);
-      setError(error.message);
-      toast.error(`Failed to load follow-ups: ${error.message}`);
-    } finally {
-      setLoading(false);
-      setTableLoading(false);
-    }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchEnquiryData();
-    fetchFollowUpData();
-  }, []);
+    fetchAllData();
+  }, [fetchAllData]);
 
   const pendingData = enquiryData.filter(item => {
     const hasFinalStatus = followUpData.some(followUp =>
@@ -215,53 +310,46 @@ const CallTracker = () => {
     return !hasFinalStatus;
   });
 
-
   // Helper function to format DD/MM/YYYY dates
-const formatDateForDisplay = (dateString) => {
-  if (!dateString || dateString.trim() === '') return '-';
-  
-  try {
-    // If it's already in DD/MM/YYYY format, return as is
-    if (typeof dateString === 'string' && dateString.includes('/')) {
-      const parts = dateString.split('/');
-      if (parts.length === 3) {
-        // Validate it's a date
-        const day = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10);
-        const year = parseInt(parts[2], 10);
-        
-        if (day > 0 && day <= 31 && month > 0 && month <= 12) {
-          return dateString;
+  const formatDateForDisplay = (dateString) => {
+    if (!dateString || dateString.trim() === '') return '-';
+    
+    try {
+      if (typeof dateString === 'string' && dateString.includes('/')) {
+        const parts = dateString.split('/');
+        if (parts.length === 3) {
+          const day = parseInt(parts[0], 10);
+          const month = parseInt(parts[1], 10);
+          if (day > 0 && day <= 31 && month > 0 && month <= 12) {
+            return dateString;
+          }
         }
       }
+      
+      const date = new Date(dateString);
+      if (!isNaN(date.getTime())) {
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}/${month}/${year}`;
+      }
+      
+      return dateString;
+    } catch (error) {
+      console.error('Error formatting date:', dateString, error);
+      return dateString || '-';
     }
-    
-    // Try to parse other date formats
-    const date = new Date(dateString);
-    if (!isNaN(date.getTime())) {
-      const day = String(date.getDate()).padStart(2, '0');
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const year = date.getFullYear();
-      return `${day}/${month}/${year}`;
-    }
-    
-    return dateString; // Return original if can't parse
-  } catch (error) {
-    console.error('Error formatting date:', dateString, error);
-    return dateString || '-';
-  }
-};
+  };
 
-
- const handleCallClick = (item) => {
-  setSelectedItem(item);
-  setFormData({
-    candidateSays: '',
-    status: '',
-    nextDate: ''
-  });
-  setShowModal(true);
-};
+  const handleCallClick = (item) => {
+    setSelectedItem(item);
+    setFormData({
+      candidateSays: '',
+      status: '',
+      nextDate: ''
+    });
+    setShowModal(true);
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -271,16 +359,10 @@ const formatDateForDisplay = (dateString) => {
     }));
   };
 
-
   const postToSheet = async (rowData) => {
     const URL = 'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec';
 
     try {
-      console.log('Attempting to post:', {
-        sheetName: 'Follow - Up',
-        rowData: rowData
-      });
-
       const params = new URLSearchParams();
       params.append('sheetName', 'Follow - Up');
       params.append('action', 'insert');
@@ -295,12 +377,10 @@ const formatDateForDisplay = (dateString) => {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
+        throw new Error(`HTTP ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('Server response:', data);
 
       if (!data.success) {
         throw new Error(data.error || 'Server returned unsuccessful response');
@@ -308,12 +388,7 @@ const formatDateForDisplay = (dateString) => {
 
       return data;
     } catch (error) {
-      console.error('Full error details:', {
-        error: error.message,
-        stack: error.stack,
-        rowData: rowData,
-        timestamp: new Date().toISOString()
-      });
+      console.error('Full error details:', error.message);
       throw new Error(`Failed to update sheet: ${error.message}`);
     }
   };
@@ -322,9 +397,6 @@ const formatDateForDisplay = (dateString) => {
     const URL = 'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec';
 
     try {
-      console.log('Attempting to update ENQUIRY sheet for:', enquiryNo);
-
-      // First, fetch the ENQUIRY sheet data to find the correct row
       const fetchResponse = await fetch(
         `${URL}?sheet=ENQUIRY&action=fetch`
       );
@@ -339,13 +411,12 @@ const formatDateForDisplay = (dateString) => {
         throw new Error('Failed to fetch ENQUIRY sheet data');
       }
 
-      // Find the row with matching enquiry number (Column C is index 2)
       let targetRowIndex = -1;
       const sheetData = fetchResult.data;
 
       for (let i = 0; i < sheetData.length; i++) {
-        if (sheetData[i][2] === enquiryNo) { // Column C (index 2)
-          targetRowIndex = i + 1; // Convert to 1-based index for Google Sheets
+        if (sheetData[i][2] === enquiryNo) {
+          targetRowIndex = i + 1;
           break;
         }
       }
@@ -354,26 +425,11 @@ const formatDateForDisplay = (dateString) => {
         throw new Error(`Enquiry number ${enquiryNo} not found in ENQUIRY sheet`);
       }
 
-      console.log(`Found enquiry ${enquiryNo} at row ${targetRowIndex}`);
-
-      // Format current date and time as 9/21/2020 14:21:19
-      const now = new Date();
-      const month = now.getMonth() + 1;
-      const day = now.getDate();
-      const year = now.getFullYear();
-      const hours = now.getHours();
-      const minutes = now.getMinutes();
-      const seconds = now.getSeconds();
-
-      // const formattedDateTime = `${month}/${day}/${year} ${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-
-      // Now update the specific cell using updateCell action
       const params = new URLSearchParams();
       params.append('sheetName', 'ENQUIRY');
       params.append('action', 'updateCell');
       params.append('rowIndex', targetRowIndex.toString());
-      params.append('columnIndex', '27'); // Column AA is index 27 (1-based)
-      // params.append('value', formattedDateTime);
+      params.append('columnIndex', '27');
 
       const response = await fetch(URL, {
         method: 'POST',
@@ -384,12 +440,10 @@ const formatDateForDisplay = (dateString) => {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
+        throw new Error(`HTTP ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('ENQUIRY sheet update response:', data);
 
       if (!data.success) {
         throw new Error(data.error || 'Failed to update ENQUIRY sheet');
@@ -397,12 +451,7 @@ const formatDateForDisplay = (dateString) => {
 
       return data;
     } catch (error) {
-      console.error('Error updating ENQUIRY sheet:', {
-        error: error.message,
-        stack: error.stack,
-        enquiryNo: enquiryNo,
-        timestamp: new Date().toISOString()
-      });
+      console.error('Error updating ENQUIRY sheet:', error.message);
       throw new Error(`Failed to update ENQUIRY sheet: ${error.message}`);
     }
   };
@@ -410,14 +459,11 @@ const formatDateForDisplay = (dateString) => {
   const formatDOB = (dateString) => {
     if (!dateString) return '';
 
-    // Handle different date formats that might come from the input
     let date;
 
-    // If it's already a Date object
     if (dateString instanceof Date) {
       date = dateString;
     }
-    // If it's in the format "1/11/2021" (mm/dd/yyyy or dd/mm/yyyy)
     else if (typeof dateString === 'string' && dateString.includes('/')) {
       const parts = dateString.split('/');
       if (parts.length === 3) {
@@ -425,7 +471,7 @@ const formatDateForDisplay = (dateString) => {
           date = new Date(parts[2], parts[1] - 1, parts[0]);
         } else {
           date = new Date(parts[2], parts[0] - 1, parts[1]);
-        }
+      }
       }
     }
     else {
@@ -454,7 +500,6 @@ const formatDateForDisplay = (dateString) => {
     }
 
     try {
-      // For ALL statuses including Joining, submit to Follow-Up sheet first
       const now = new Date();
       const day = String(now.getDate()).padStart(2, '0');
       const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -476,25 +521,17 @@ const formatDateForDisplay = (dateString) => {
 
       await postToSheet(rowData);
 
-      // If status is "Joining", also update the ENQUIRY sheet
       if (formData.status === 'Joining') {
         await updateEnquirySheet(selectedItem.candidateEnquiryNo);
       }
 
       toast.success('Update successful!');
       setShowModal(false);
-      fetchEnquiryData();
-      fetchFollowUpData();
+      fetchAllData();
 
     } catch (error) {
       console.error('Submission failed:', error);
       toast.error(`Failed to update: ${error.message}`);
-      if (error.message.includes('appendRow')) {
-        toast('Please verify the "Follow-Up" sheet exists', {
-          icon: 'ℹ️',
-          duration: 8000
-        });
-      }
     } finally {
       setSubmitting(false);
     }
@@ -570,6 +607,14 @@ const formatDateForDisplay = (dateString) => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-800">Call Tracker</h1>
+        <button
+          onClick={exportToExcel}
+          className="inline-flex items-center px-4 py-2 border border-green-600 rounded-md text-sm font-medium text-green-600 hover:bg-green-50 transition-all duration-200"
+          title={`Export ${activeTab} data to Excel`}
+        >
+          <Download size={16} className="mr-2" />
+          Export {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Excel
+        </button>
       </div>
 
       {/* Filter and Search */}
@@ -685,39 +730,21 @@ const formatDateForDisplay = (dateString) => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Resume
                     </th>
-                    {/* In Pending tab table headers, add this th after Department */}
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                          Planned Date
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {tableLoading ? (
+                  {!dataLoaded && filteredPendingData.length === 0 ? (
                     <tr>
-                      <td colSpan="10" className="px-6 py-12 text-center">
-                        <div className="flex justify-center flex-col items-center">
-                          <div className="w-6 h-6 border-4 border-indigo-500 border-dashed rounded-full animate-spin mb-2"></div>
-                          <span className="text-gray-600 text-sm">
-                            Loading pending calls...
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : error ? (
-                    <tr>
-                      <td colSpan="10" className="px-6 py-12 text-center">
-                        <p className="text-red-500">Error: {error}</p>
-                        <button
-                          onClick={fetchEnquiryData}
-                          className="mt-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-                        >
-                          Retry
-                        </button>
+                      <td colSpan="11" className="px-6 py-4 text-center text-gray-500">
+                        Loading data...
                       </td>
                     </tr>
                   ) : filteredPendingData.length === 0 ? (
                     <tr>
-                      <td colSpan="10" className="px-6 py-12 text-center">
+                      <td colSpan="11" className="px-6 py-12 text-center">
                         <p className="text-gray-500">No pending calls found.</p>
                       </td>
                     </tr>
@@ -821,15 +848,10 @@ const formatDateForDisplay = (dateString) => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {tableLoading ? (
+                  {!dataLoaded && getFollowUpData().length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="px-6 py-12 text-center">
-                        <div className="flex justify-center flex-col items-center">
-                          <div className="w-6 h-6 border-4 border-green-500 border-dashed rounded-full animate-spin mb-2"></div>
-                          <span className="text-gray-600 text-sm">
-                            Loading follow-up calls...
-                          </span>
-                        </div>
+                      <td colSpan="7" className="px-6 py-4 text-center text-gray-500">
+                        Loading data...
                       </td>
                     </tr>
                   ) : getFollowUpData().length === 0 ? (
@@ -844,7 +866,6 @@ const formatDateForDisplay = (dateString) => {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <button
                             onClick={() => {
-                              // Find the corresponding enquiry item from enquiryData
                               const enquiryItem = enquiryData.find(e => 
                                 e.candidateEnquiryNo === item.enquiryNo
                               );
@@ -948,15 +969,10 @@ const formatDateForDisplay = (dateString) => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {tableLoading ? (
+                  {!dataLoaded && getInterviewData().length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="px-6 py-12 text-center">
-                        <div className="flex justify-center flex-col items-center">
-                          <div className="w-6 h-6 border-4 border-blue-500 border-dashed rounded-full animate-spin mb-2"></div>
-                          <span className="text-gray-600 text-sm">
-                            Loading interview calls...
-                          </span>
-                        </div>
+                      <td colSpan="7" className="px-6 py-4 text-center text-gray-500">
+                        Loading data...
                       </td>
                     </tr>
                   ) : getInterviewData().length === 0 ? (
@@ -1074,15 +1090,10 @@ const formatDateForDisplay = (dateString) => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {tableLoading ? (
+                  {!dataLoaded && getOnHoldData().length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="px-6 py-12 text-center">
-                        <div className="flex justify-center flex-col items-center">
-                          <div className="w-6 h-6 border-4 border-yellow-500 border-dashed rounded-full animate-spin mb-2"></div>
-                          <span className="text-gray-600 text-sm">
-                            Loading on hold calls...
-                          </span>
-                        </div>
+                      <td colSpan="7" className="px-6 py-4 text-center text-gray-500">
+                        Loading data...
                       </td>
                     </tr>
                   ) : getOnHoldData().length === 0 ? (
@@ -1197,15 +1208,10 @@ const formatDateForDisplay = (dateString) => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {tableLoading ? (
+                  {!dataLoaded && getHistoryData().length === 0 ? (
                     <tr>
-                      <td colSpan="6" className="px-6 py-12 text-center">
-                        <div className="flex justify-center flex-col items-center">
-                          <div className="w-6 h-6 border-4 border-purple-500 border-dashed rounded-full animate-spin mb-2"></div>
-                          <span className="text-gray-600 text-sm">
-                            Loading history...
-                          </span>
-                        </div>
+                      <td colSpan="6" className="px-6 py-4 text-center text-gray-500">
+                        Loading data...
                       </td>
                     </tr>
                   ) : getHistoryData().length === 0 ? (

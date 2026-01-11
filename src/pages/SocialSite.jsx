@@ -3,6 +3,51 @@ import { Search, Clock, CheckCircle, X, AlertCircle } from 'lucide-react';
 import useDataStore from '../store/dataStore';
 import toast from 'react-hot-toast';
 
+// Add this function before the SocialSite component
+const formatDateToDDMMYY = (dateString) => {
+  if (!dateString || dateString.trim() === '') return '';
+  
+  try {
+    // Try to parse the date string
+    let date = new Date(dateString);
+    
+    // If date is invalid, try to parse as dd/mm/yyyy or dd-mm-yyyy
+    if (isNaN(date.getTime())) {
+      // Try different date formats
+      const parts = dateString.split(/[/-]/);
+      if (parts.length === 3) {
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1; // Months are 0-indexed
+        const year = parseInt(parts[2], 10);
+        // Handle 2-digit years
+        const fullYear = year < 100 ? 2000 + year : year;
+        date = new Date(fullYear, month, day);
+      }
+    }
+    
+    // If still invalid, return the original string
+    if (isNaN(date.getTime())) {
+      return dateString;
+    }
+    
+    // Format to dd/mm/yy
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear().toString().slice(-2); // Last 2 digits
+    
+    return `${day}/${month}/${year}`;
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return dateString; // Return original if formatting fails
+  }
+};
+
+// Add formatTableDate function for displaying dates in tables
+const formatTableDate = (dateString) => {
+  if (!dateString || dateString.trim() === '') return '-';
+  return dateString;
+};
+
 const SocialSite = () => {
   const [activeTab, setActiveTab] = useState('pending');
   const [searchTerm, setSearchTerm] = useState('');
@@ -10,17 +55,16 @@ const SocialSite = () => {
   const [selectedItem, setSelectedItem] = useState(null);
   const [pendingData, setPendingData] = useState([]);
   const [historyData, setHistoryData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [tableLoading, setTableLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   // API Base URL - centralized
   const API_BASE_URL = 'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec';
 
   const [formData, setFormData] = useState({
     socialSite: '',
-    socialSiteTypes: []
+    socialSiteTypes: [],
+    jobDescription: '', // This will be text input
   });
 
   // Social Site Types options
@@ -61,10 +105,6 @@ const SocialSite = () => {
 
   // Fetch INDENT data for Social Site pending and history items
   const fetchAllData = async () => {
-    setLoading(true);
-    setTableLoading(true);
-    setError(null);
-    
     try {
       const indentResult = await fetchIndentData();
       
@@ -73,10 +113,10 @@ const SocialSite = () => {
       
       const getIndex = (headerName) => headers.findIndex(h => h === headerName);
       
-      // Process all data first with corrected column mappings
+      // Process ALL data first - remove initial filtering
       const allProcessedData = dataFromRow7
         .filter(row => {
-          // Column L (index 11) should not be null/empty
+          // Only include rows that have at least Column L with value
           const columnL = row[11]; // Column L (0-indexed)
           return columnL && columnL !== '';
         })
@@ -88,37 +128,33 @@ const SocialSite = () => {
           gender: row[getIndex('Gender')] || '', // Gender column
           prefer: row[getIndex('Prefer')] || '', // Prefer column
           numberOfEnquiry: row[6] || '', // Column G - Number Of Enquiry Need
-          positionFulfillDate: row[7] || '', // Column H - Position Full-Fill Date
+          positionFulfillDate: formatDateToDDMMYY(row[7] || ''), // Format Column H
           status: row[10] || '', // Column K - Status
           socialSitePost: row[14] || '', // Column O - Social Site Post
           which: row[15] || '', // Column P - Which
-          columnL: row[11] || '', // Column L
-          columnM: row[12] || '' ,// Column M
-          planned: row[11] || '' // Column L - Planned 1
-
+          columnL: row[11] || '', // Column L - Planned
+          columnM: row[12] || '', // Column M - Actual
+          jobDescription: row[20] || '', // Add this line for Column U
         }));
       
-      // NEW LOGIC: Separate pending and history data based on Status column
+      // NEW LOGIC: Separate pending and history data based on BOTH columns
       const pendingItems = allProcessedData.filter(item => {
-        // Pending: status is NOT "Complete"
-        return !item.status || item.status.toLowerCase() !== 'complete';
+        // Pending: Column L has value AND Column M is empty/null
+        return item.columnL && item.columnL !== '' && (!item.columnM || item.columnM === '');
       });
       
       const historyItems = allProcessedData.filter(item => {
-        // History: status IS "Complete"
-        return item.status && item.status.toLowerCase() === 'complete';
+        // History: BOTH Column L AND Column M have values
+        return item.columnL && item.columnL !== '' && item.columnM && item.columnM !== '';
       });
       
       setPendingData(pendingItems);
       setHistoryData(historyItems);
+      setDataLoaded(true);
       
     } catch (error) {
       console.error('Error fetching data:', error);
-      setError(error.message);
       toast.error('Failed to fetch data');
-    } finally {
-      setLoading(false);
-      setTableLoading(false);
     }
   };
 
@@ -131,7 +167,8 @@ const SocialSite = () => {
     // Pre-fill the form if Social Site already posted
     setFormData({
       socialSite: item.socialSitePost || '',
-      socialSiteTypes: item.which ? item.which.split(',').map(s => s.trim()).filter(s => s) : []
+      socialSiteTypes: item.which ? item.which.split(',').map(s => s.trim()).filter(s => s) : [],
+      jobDescription: item.jobDescription || '', // Add this line
     });
     setShowModal(true);
   };
@@ -195,8 +232,8 @@ const SocialSite = () => {
       // Find the row index
       let rowIndex = -1;
       for (let i = 1; i < indentResult.data.length; i++) {
-        if (indentResult.data[i][1] === selectedItem.indentNo) { // Assuming column B contains Indent Number
-          rowIndex = i + 1; // Spreadsheet rows start at 1
+        if (indentResult.data[i][1] === selectedItem.indentNo) {
+          rowIndex = i + 1;
           break;
         }
       }
@@ -214,11 +251,13 @@ const SocialSite = () => {
       const columnMValue = formattedDate; // Actual date in Column M
       const columnOValue = formData.socialSite; // Social Site Post (Yes/No) in Column O  
       const columnPValue = formData.socialSite === 'Yes' ? socialSiteTypesString : 'No'; // Which field in Column P
+      const columnUValue = formData.jobDescription || ''; // Job Description text in Column U
 
       // Update columns using centralized function
       await updateCell(rowIndex, 13, columnMValue); // Column M - date
       await updateCell(rowIndex, 15, columnOValue); // Column O - Social Site Post
       await updateCell(rowIndex, 16, columnPValue); // Column P - Which
+      await updateCell(rowIndex, 21, columnUValue); // Column U - Job Description
 
       toast.success(`Social Site information updated successfully with date: ${formattedDate}`);
       setShowModal(false);
@@ -252,7 +291,7 @@ const SocialSite = () => {
         <h1 className="text-2xl font-bold text-gray-800">Social Site </h1>
       </div>
 
-      {/* Fter and Search */}
+      {/* Filter and Search */}
       <div className="bg-white p-4 rounded-lg shadow flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0 md:space-x-4">
         <div className="flex flex-1 max-w-md">
           <div className="relative w-full">
@@ -337,32 +376,20 @@ const SocialSite = () => {
                       Social Site Status
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Last Updated
-                    </th>
-                    {/* In Pending tab table header, add this th */}
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                       Planned
-                      </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
+                      Planned
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {tableLoading ? (
+                  {!dataLoaded && pendingData.length === 0 ? (
                     <tr>
-                      <td colSpan="12" className="px-6 py-12 text-center">
-                        <div className="flex justify-center flex-col items-center">
-                          <div className="w-6 h-6 border-4 border-indigo-500 border-dashed rounded-full animate-spin mb-2"></div>
-                          <span className="text-gray-600 text-sm">
-                            Loading pending social site data...
-                          </span>
-                        </div>
+                      <td colSpan="10" className="px-6 py-4 text-center text-gray-500">
+                        Loading data...
                       </td>
                     </tr>
                   ) : filteredPendingData.length === 0 ? (
                     <tr>
-                      <td colSpan="12" className="px-6 py-12 text-center">
+                      <td colSpan="10" className="px-6 py-12 text-center">
                         <p className="text-gray-500">
                           No pending social site data found.
                         </p>
@@ -405,7 +432,7 @@ const SocialSite = () => {
                           {item.numberOfEnquiry || '-'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {item.positionFulfillDate || '-'}
+                          {formatTableDate(item.positionFulfillDate)}
                         </td>
                         {/* End New Columns Data */}
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -431,25 +458,12 @@ const SocialSite = () => {
                           )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {item.columnM ? (
-                            <span className="text-blue-600">{item.columnM}</span>
+                          {item.columnL ? (
+                            <span className="text-blue-600">{item.columnL}</span>
                           ) : (
                             <span className="text-gray-400">-</span>
                           )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                       {item.planned || '-'}
-                      </td>
-
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                            item.status.toLowerCase() === 'complete'
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-yellow-100 text-yellow-800'
-                          }`}>
-                            {item.status}
-                          </span>
-                        </td>
+                        </td>                  
                       </tr>
                     ))
                   )}
@@ -491,6 +505,9 @@ const SocialSite = () => {
                       Which
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Job Description
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Last Updated
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -499,20 +516,15 @@ const SocialSite = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {tableLoading ? (
+                  {!dataLoaded && historyData.length === 0 ? (
                     <tr>
-                      <td colSpan="11" className="px-6 py-12 text-center">
-                        <div className="flex justify-center flex-col items-center">
-                          <div className="w-6 h-6 border-4 border-indigo-500 border-dashed rounded-full animate-spin mb-2"></div>
-                          <span className="text-gray-600 text-sm">
-                            Loading social site history...
-                          </span>
-                        </div>
+                      <td colSpan="12" className="px-6 py-4 text-center text-gray-500">
+                        Loading data...
                       </td>
                     </tr>
                   ) : filteredHistoryData.length === 0 ? (
                     <tr>
-                      <td colSpan="11" className="px-6 py-12 text-center">
+                      <td colSpan="12" className="px-6 py-12 text-center">
                         <p className="text-gray-500">
                           No social site history found.
                         </p>
@@ -541,7 +553,7 @@ const SocialSite = () => {
                           {item.numberOfEnquiry || '-'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {item.positionFulfillDate || '-'}
+                          {formatTableDate(item.positionFulfillDate)}
                         </td>
                         {/* End New Columns Data */}
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -555,6 +567,15 @@ const SocialSite = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {item.which}
+                        </td>
+                        <td className="px-6 py-4 whitespace-normal text-sm text-gray-900 max-w-xs">
+                          {item.jobDescription ? (
+                            <div className="max-h-20 overflow-y-auto">
+                              {item.jobDescription}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           <span className="text-blue-600">{item.columnM}</span>
@@ -644,31 +665,51 @@ const SocialSite = () => {
 
                   {/* Social Site Types checklist - only show when socialSite is Yes */}
                   {formData.socialSite === "Yes" && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Social Site Types*
-                      </label>
-                      <div className="space-y-2 max-h-40 overflow-y-auto border border-gray-300 rounded-md p-2">
-                        {socialSiteOptions.map((option) => (
-                          <div key={option} className="flex items-center">
-                            <input
-                              type="checkbox"
-                              id={option}
-                              value={option}
-                              checked={formData.socialSiteTypes.includes(option)}
-                              onChange={handleSocialSiteTypeChange}
-                              className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                            />
-                            <label
-                              htmlFor={option}
-                              className="ml-2 block text-sm text-gray-700"
-                            >
-                              {option}
-                            </label>
-                          </div>
-                        ))}
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Social Site Types*
+                        </label>
+                        <div className="space-y-2 max-h-40 overflow-y-auto border border-gray-300 rounded-md p-2">
+                          {socialSiteOptions.map((option) => (
+                            <div key={option} className="flex items-center">
+                              <input
+                                type="checkbox"
+                                id={option}
+                                value={option}
+                                checked={formData.socialSiteTypes.includes(option)}
+                                onChange={handleSocialSiteTypeChange}
+                                className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                              />
+                              <label
+                                htmlFor={option}
+                                className="ml-2 block text-sm text-gray-700"
+                              >
+                                {option}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+
+                      {/* Job Description Textarea */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Job Description
+                        </label>
+                        <textarea
+                          name="jobDescription"
+                          value={formData.jobDescription}
+                          onChange={handleInputChange}
+                          placeholder="Enter job description details..."
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 min-h-[100px] resize-y"
+                          rows={4}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Enter the job description details that were posted on social sites.
+                        </p>
+                      </div>
+                    </>
                   )}
                 </div>
 
