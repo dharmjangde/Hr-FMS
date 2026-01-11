@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 
 import {
@@ -38,6 +38,7 @@ import {
 import useAuthStore from '../store/authStore';
 
 const Sidebar = ({ onClose }) => {
+
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [attendanceOpen, setAttendanceOpen] = useState(false);
@@ -65,7 +66,9 @@ const [payrollCount, setPayrollCount] = useState(0);
 const [advanceReportCount, setAdvanceReportCount] = useState(0);
 const [deductionsCount, setDeductionsCount] = useState(0);
 const [siesEmployeesCount, setSiesEmployeesCount] = useState(0);
-
+  const sidebarRef = useRef(null);
+  const scrollPositionRef = useRef(0);
+  const isNavigatingRef = useRef(false);
 
   const userString = localStorage.getItem('user');
   const user = userString ? JSON.parse(userString) : null;
@@ -1491,6 +1494,48 @@ useEffect(() => {
   }
 }, [user?.Admin]);
 // Add this useEffect for counting ALL deduction records
+
+
+// Add this useEffect - place it after your other useEffects
+useEffect(() => {
+  // Save scroll position before navigation
+  scrollPositionRef.current = 0;
+  isNavigatingRef.current = false;
+  
+  // Override the default scrollIntoView behavior
+  const originalScrollIntoView = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function(options) {
+    // Prevent auto-scroll during navigation
+    if (isNavigatingRef.current) {
+      return;
+    }
+    // For normal cases, use with preventScroll
+    if (typeof options === 'object') {
+      return originalScrollIntoView.call(this, { 
+        ...options, 
+        behavior: 'auto',
+        block: 'nearest',
+        preventScroll: true 
+      });
+    }
+    return originalScrollIntoView.call(this, false);
+  };
+  
+  // Override focus to prevent scroll
+  const originalFocus = HTMLElement.prototype.focus;
+  HTMLElement.prototype.focus = function(options) {
+    return originalFocus.call(this, { 
+      ...options, 
+      preventScroll: true 
+    });
+  };
+  
+  return () => {
+    // Restore original methods
+    Element.prototype.scrollIntoView = originalScrollIntoView;
+    HTMLElement.prototype.focus = originalFocus;
+  };
+}, []);
 useEffect(() => {
   const fetchDeductionsCount = async () => {
     try {
@@ -2350,101 +2395,26 @@ if (!document.getElementById('sidebar-scroll-prevention')) {
 const SidebarContent = ({ onClose, isCollapsed = false }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const sidebarRef = React.useRef(null);
-  const lastScrollTopRef = React.useRef(0);
-  const isRestoringScrollRef = React.useRef(false);
-  const scrollTimeoutRef = React.useRef(null);
-  const prevPathRef = React.useRef(location.pathname);
-
-  // Save scroll position when user scrolls
-  React.useEffect(() => {
-    const sidebar = sidebarRef.current;
-    if (!sidebar) return;
-
-    const handleScroll = () => {
-      if (!isRestoringScrollRef.current) {
-        lastScrollTopRef.current = sidebar.scrollTop;
-      }
-    };
-
-    sidebar.addEventListener('scroll', handleScroll, { passive: true });
-
-    return () => {
-      sidebar.removeEventListener('scroll', handleScroll);
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Restore scroll position on location change - ONE TIME ONLY
-  React.useEffect(() => {
-    if (prevPathRef.current === location.pathname) return;
-    
-    prevPathRef.current = location.pathname;
-
-    // Clear any existing timeout
-    if (scrollTimeoutRef.current) {
-      clearTimeout(scrollTimeoutRef.current);
-    }
-
-    const restoreScroll = () => {
-      const sidebar = sidebarRef.current;
-      if (!sidebar) return;
-
-      // Only restore if we have a saved position
-      if (lastScrollTopRef.current > 0) {
-        isRestoringScrollRef.current = true;
-        
-        // Set scroll position directly - NO ANIMATION
-        sidebar.scrollTop = lastScrollTopRef.current;
-        
-        // Clear the restoring flag immediately
-        setTimeout(() => {
-          isRestoringScrollRef.current = false;
-        }, 0);
-      }
-    };
-
-    // Restore scroll after a minimal delay to ensure DOM is stable
-    scrollTimeoutRef.current = setTimeout(restoreScroll, 10);
-
-    return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-    };
-  }, [location.pathname]);
-
-  // Save scroll position before navigation
-  const saveScrollPosition = React.useCallback(() => {
-    if (sidebarRef.current) {
-      lastScrollTopRef.current = sidebarRef.current.scrollTop;
-    }
-  }, []);
-
-  // Handle navigation
-  const handleNavigation = React.useCallback((path) => {
-    // Save scroll position BEFORE navigation
-    saveScrollPosition();
+  
+  // Function to handle navigation WITHOUT auto-scroll
+  const handleNavigation = useCallback((path) => {
+    // Set navigating flag
+    isNavigatingRef.current = true;
     
     // Navigate
     navigate(path);
+    
+    // Reset flag after navigation
+    setTimeout(() => {
+      isNavigatingRef.current = false;
+    }, 100);
     
     // Close sidebar on mobile/tablet
     if (onClose) {
       setTimeout(() => onClose(), 50);
     }
-  }, [navigate, onClose, saveScrollPosition]);
-
-  // Handle dropdown toggle
-  const handleDropdownToggle = React.useCallback((toggleFn) => {
-    // Save scroll position
-    saveScrollPosition();
-    // Toggle dropdown
-    toggleFn();
-  }, [saveScrollPosition]);
-
+  }, [navigate, onClose]);
+  
   return (
     <div className={`flex flex-col h-full ${isCollapsed ? 'w-16' : 'w-64'} bg-gray-600 text-white`}>
       {/* Header */}
@@ -2473,9 +2443,8 @@ const SidebarContent = ({ onClose, isCollapsed = false }) => {
         )}
       </div>
 
-      {/* Menu - Fixed scroll behavior */}
+      {/* Menu - with scroll prevention */}
       <div 
-        ref={sidebarRef} 
         className="flex-1 overflow-y-auto scrollbar-hide"
         style={{ 
           scrollBehavior: 'auto',
@@ -2484,80 +2453,6 @@ const SidebarContent = ({ onClose, isCollapsed = false }) => {
       >
         <nav className="py-4 px-2 space-y-1">
           {menuItems.map((item, index) => {
-            if (item.type === 'dropdown') {
-              return (
-                <div key={`${item.label}-${index}`}>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleDropdownToggle(item.toggle);
-                    }}
-                    className={`flex items-center justify-between w-full py-2.5 px-4 rounded-lg transition-colors relative ${
-                      item.isOpen
-                        ? 'bg-indigo-800 text-white'
-                        : 'text-indigo-100 hover:bg-indigo-800 hover:text-white'
-                    }`}
-                  >
-                    <div className="flex items-center relative">
-                      <item.icon className={isCollapsed ? 'mx-auto' : 'mr-3'} size={20} />
-                      {!isCollapsed && <span>{item.label}</span>}
-                      
-                      {isCollapsed && item.badge && item.badge > 0 && (
-                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center sidebar-badge-sm">
-                          {item.badge > 9 ? '9+' : item.badge}
-                        </span>
-                      )}
-                    </div>
-                    
-                    {!isCollapsed && (
-                      <div className="flex items-center gap-2">
-                        {item.badge && item.badge > 0 && (
-                          <span className="sidebar-badge">
-                            {item.badge > 9 ? '9+' : item.badge}
-                          </span>
-                        )}
-                        {item.isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                      </div>
-                    )}
-                  </button>
-
-                  {item.isOpen && !isCollapsed && (
-                    <div className="ml-6 mt-1 space-y-1">
-                      {item.items.map((subItem, subIndex) => {
-                        const isActive = location.pathname === subItem.path;
-                        
-                        return (
-                          <button
-                            key={`${subItem.path}-${subIndex}`}
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              handleNavigation(subItem.path);
-                            }}
-                            className={`dropdown-item flex items-center justify-between py-2 px-4 rounded-lg transition-colors cursor-pointer w-full text-left ${
-                              isActive
-                                ? 'bg-indigo-700 text-white'
-                                : 'text-indigo-100 hover:bg-indigo-800 hover:text-white'
-                            }`}
-                          >
-                            <span>{subItem.label}</span>
-                            {subItem.badge && subItem.badge > 0 && (
-                              <span className="dropdown-badge sidebar-badge">
-                                {subItem.badge > 9 ? '9+' : subItem.badge}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            }
-
             const isActive = location.pathname === item.path;
             
             return (
@@ -2628,7 +2523,6 @@ const SidebarContent = ({ onClose, isCollapsed = false }) => {
     </div>
   );
 };
-
 
 
   return (
