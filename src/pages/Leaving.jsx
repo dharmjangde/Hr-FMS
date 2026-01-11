@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Filter, Search, Clock, CheckCircle, X } from 'lucide-react';
-import useDataStore from '../store/dataStore';
+import { Search, Clock, CheckCircle, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const Leaving = () => {
@@ -10,6 +9,7 @@ const Leaving = () => {
   const [selectedItem, setSelectedItem] = useState(null);
   const [pendingData, setPendingData] = useState([]);
   const [historyData, setHistoryData] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({
@@ -22,126 +22,171 @@ const Leaving = () => {
     amount: ''
   });
 
-  const fetchJoiningData = async () => {
+  // Fetch both datasets in parallel
+  const fetchData = async () => {
     try {
-      const response = await fetch(
-        'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=JOINING&action=fetch'
-      );
+      setLoading(true);
+      setError(null);
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      console.log('Fetching leaving data from API...');
+      
+      // Fetch both JOINING and LEAVING data in parallel
+      const [joiningResponse, leavingResponse] = await Promise.all([
+        fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=JOINING&action=fetch'),
+        fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=LEAVING&action=fetch')
+      ]);
+      
+      console.log('JOINING Response status:', joiningResponse.status);
+      console.log('LEAVING Response status:', leavingResponse.status);
+      
+      if (!joiningResponse.ok || !leavingResponse.ok) {
+        throw new Error(`HTTP error! status: ${joiningResponse.status}/${leavingResponse.status}`);
       }
       
-      const result = await response.json();
+      const joiningResult = await joiningResponse.json();
+      const leavingResult = await leavingResponse.json();
       
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to fetch data from JOINING sheet');
+      console.log('JOINING API Response:', joiningResult.success ? 'Success' : 'Failed');
+      console.log('LEAVING API Response:', leavingResult.success ? 'Success' : 'Failed');
+      
+      if (joiningResult.success) {
+        const processedJoiningData = processJoiningData(joiningResult.data);
+        console.log('Processed JOINING Data:', processedJoiningData.length, 'records');
+        setPendingData(processedJoiningData);
+      } else {
+        throw new Error(joiningResult.error || 'Failed to fetch data from JOINING sheet');
       }
       
-      const rawData = result.data || result;
-      
-      if (!Array.isArray(rawData)) {
-        throw new Error('Expected array data not received');
+      if (leavingResult.success) {
+        const processedLeavingData = processLeavingData(leavingResult.data);
+        console.log('Processed LEAVING Data:', processedLeavingData.length, 'records');
+        setHistoryData(processedLeavingData);
+      } else {
+        throw new Error(leavingResult.error || 'Failed to fetch data from LEAVING sheet');
       }
-
-      const headers = rawData[5];
-      const dataRows = rawData.length > 6 ? rawData.slice(6) : [];
       
-      const getIndex = (headerName) => {
-        const index = headers.findIndex(h => 
-          h && h.toString().trim().toLowerCase() === headerName.toLowerCase()
-        );
-        return index;
-      };
-
-      const processedData = dataRows.map((row, index) => ({
-        rowIndex: index + 7,
-        employeeCode: row[getIndex('Employee Code')] || row[0] || '',
-        employeeNo: row[getIndex('SKA-Joining ID')] || row[1] || '',
-        candidateName: row[getIndex('Name As Per Aadhar')] || row[2] || '',
-        fatherName: row[getIndex('Father Name')] || row[3] || '',
-        dateOfJoining: row[getIndex('Date Of Joining')] || row[4] || '',
-        designation: row[getIndex('Designation')] || row[5] || '',
-        department: row[getIndex('Department')] || row[20] || '',
-        mobileNo: row[getIndex('Mobile No.')] || '',
-        firmName: row[getIndex('Joining Company Name')] || '',
-        workingPlace: row[getIndex('Joining Place')] || '',
-        plannedDate: row[getIndex('Planned Date')] || '',
-        actual: row[getIndex('Actual')] || '',
-        leavingDate: row[24] || '',
-        reason: row[25] || '',
-        columnAZ: row[51] || '',
-        columnBA: row[52] || '',
-      }));
-
-      const pendingLeavingTasks = processedData.filter(
-        (task) => task.columnAZ && task.columnAZ !== '' && (!task.columnBA || task.columnBA === '')
-      );
-      
-      setPendingData(pendingLeavingTasks);
-    } catch (error) {
-      console.error('Error fetching joining data:', error);
-      setError(error.message);
-      toast.error(`Failed to load joining data: ${error.message}`);
+    } catch (err) {
+      console.error('Error fetching leaving data:', err);
+      setError(err.message);
+      toast.error(`Failed to load data: ${err.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const fetchLeavingData = async () => {
-    try {
-      const response = await fetch(
-        'https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=LEAVING&action=fetch'
-      );
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to fetch data from LEAVING sheet');
-      }
-      
-      const rawData = result.data || result;
-      
-      if (!Array.isArray(rawData)) {
-        throw new Error('Expected array data not received');
-      }
-
-      const dataRows = rawData.length > 6 ? rawData.slice(6) : [];
-      
-      const processedData = dataRows.map(row => ({
-        timestamp: row[0] || '',
-        employeeId: row[1] || '',
-        name: row[2] || '',
-        dateOfLeaving: row[3] || '',
-        mobileNo: row[4] || '',
-        reasonOfLeaving: row[5] || '',
-        firmName: row[6] || '',
-        fatherName: row[7] || '',
-        dateOfJoining: row[8] || '',
-        workingLocation: row[9] || '',
-        designation: row[10] || '',
-        department: row[11] || '',
-        plannedDate: row[12] || '',
-        actual: row[13] || '',
-      }));
-
-      const historyTasks = processedData;
-      setHistoryData(historyTasks);
-    } catch (error) {
-      console.error('Error fetching leaving data:', error);
-      setError(error.message);
-      toast.error(`Failed to load leaving data: ${error.message}`);
+  // Process JOINING sheet data
+  const processJoiningData = (sheetData) => {
+    if (!sheetData || sheetData.length === 0) {
+      console.log('No JOINING sheet data available');
+      return [];
     }
+    
+    console.log('JOINING Raw Sheet Data rows:', sheetData.length);
+    
+    // Headers are at row 6 (index 5)
+    const headers = sheetData[5] || [];
+    const rows = sheetData.length > 6 ? sheetData.slice(6) : [];
+    
+    console.log('JOINING Headers:', headers);
+    console.log('JOINING Data rows:', rows.length);
+    
+    // Create column map for faster access
+    const columnMap = {};
+    headers.forEach((header, index) => {
+      if (header) {
+        const cleanHeader = header.toString().trim();
+        columnMap[cleanHeader] = index;
+        columnMap[cleanHeader.toLowerCase()] = index;
+        columnMap[cleanHeader.toUpperCase()] = index;
+      }
+    });
+    
+    console.log('JOINING Column Map keys:', Object.keys(columnMap));
+    
+    const processedRows = rows.map((row, index) => {
+      // Get values using column map with fallbacks
+      const employeeCode = row[columnMap['Employee Code']] || row[0] || '';
+      const employeeNo = row[columnMap['SKA-Joining ID']] || row[1] || '';
+      const candidateName = row[columnMap['Name As Per Aadhar']] || row[2] || '';
+      const fatherName = row[columnMap['Father Name']] || row[3] || '';
+      const dateOfJoining = row[columnMap['Date Of Joining']] || row[4] || '';
+      const designation = row[columnMap['Designation']] || row[5] || '';
+      const department = row[columnMap['Department']] || row[20] || '';
+      const mobileNo = row[columnMap['Mobile No.']] || '';
+      const firmName = row[columnMap['Joining Company Name']] || '';
+      const workingPlace = row[columnMap['Joining Place']] || '';
+      const plannedDate = row[columnMap['Planned Date']] || '';
+      const actual = row[columnMap['Actual']] || '';
+      const leavingDate = row[24] || '';
+      const reason = row[25] || '';
+      const columnAZ = row[51] || '';
+      const columnBA = row[52] || '';
+      
+      return {
+        rowIndex: index + 7,
+        employeeCode,
+        employeeNo,
+        candidateName,
+        fatherName,
+        dateOfJoining,
+        designation,
+        department,
+        mobileNo,
+        firmName,
+        workingPlace,
+        plannedDate,
+        actual,
+        leavingDate,
+        reason,
+        columnAZ,
+        columnBA
+      };
+    }).filter(task => 
+      task.columnAZ && task.columnAZ !== '' && (!task.columnBA || task.columnBA === '')
+    );
+    
+    console.log('JOINING Processed rows for pending:', processedRows.length);
+    return processedRows;
+  };
+
+  // Process LEAVING sheet data
+  const processLeavingData = (sheetData) => {
+    if (!sheetData || sheetData.length === 0) {
+      console.log('No LEAVING sheet data available');
+      return [];
+    }
+    
+    console.log('LEAVING Raw Sheet Data rows:', sheetData.length);
+    
+    // Process data starting from row 7 (index 6)
+    const rows = sheetData.length > 6 ? sheetData.slice(6) : [];
+    
+    const processedRows = rows.map(row => ({
+      timestamp: row[0] || '',
+      employeeId: row[1] || '',
+      name: row[2] || '',
+      dateOfLeaving: row[3] || '',
+      mobileNo: row[4] || '',
+      reasonOfLeaving: row[5] || '',
+      firmName: row[6] || '',
+      fatherName: row[7] || '',
+      dateOfJoining: row[8] || '',
+      workingLocation: row[9] || '',
+      designation: row[10] || '',
+      department: row[11] || '',
+      plannedDate: row[12] || '',
+      actual: row[13] || '',
+    }));
+    
+    console.log('LEAVING Processed rows:', processedRows.length);
+    return processedRows;
   };
 
   useEffect(() => {
-    Promise.all([fetchJoiningData(), fetchLeavingData()]).catch(error => {
-      console.error('Error in initial data fetch:', error);
-    });
+    fetchData();
   }, []);
 
+  // Filter pending data to remove employees already in history
   const filteredPendingData = pendingData
     .filter(item => {
       const isInHistory = historyData.some(historyItem => 
@@ -150,14 +195,19 @@ const Leaving = () => {
       return !isInHistory;
     })
     .filter(item => {
-      const matchesSearch = item.candidateName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           item.employeeNo?.toLowerCase().includes(searchTerm.toLowerCase());
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = 
+        item.candidateName?.toLowerCase().includes(searchLower) ||
+        item.employeeNo?.toLowerCase().includes(searchLower);
       return matchesSearch;
     });
 
+  // Filter history data
   const filteredHistoryData = historyData.filter(item => {
-    const matchesSearch = item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         item.employeeId?.toLowerCase().includes(searchTerm.toLowerCase());
+    const searchLower = searchTerm.toLowerCase();
+    const matchesSearch = 
+      item.name?.toLowerCase().includes(searchLower) ||
+      item.employeeId?.toLowerCase().includes(searchLower);
     return matchesSearch;
   });
 
@@ -220,195 +270,108 @@ const Leaving = () => {
       const lastWorkingDate = new Date(formData.lastWorkingDate);
       const formattedLastWorkingDate = `${lastWorkingDate.getDate().toString().padStart(2, '0')}/${(lastWorkingDate.getMonth() + 1).toString().padStart(2, '0')}/${lastWorkingDate.getFullYear()}`;
 
-      const updateActualParams = new URLSearchParams({
-        sheetName: 'JOINING',
-        action: 'updateCell',
-        rowIndex: selectedItem.rowIndex.toString(),
-        columnIndex: '53',
-        value: formattedTimestamp,
-      });
+      // Prepare all update promises
+      const updatePromises = [];
 
-      const updateActualResponse = await fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
-        method: 'POST',
-        body: updateActualParams,
-      });
+      // Update Column BA with actual date
+      updatePromises.push(
+        fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
+          method: 'POST',
+          body: new URLSearchParams({
+            sheetName: 'JOINING',
+            action: 'updateCell',
+            rowIndex: selectedItem.rowIndex.toString(),
+            columnIndex: '53',
+            value: formattedTimestamp,
+          }),
+        })
+      );
 
-      const updateActualText = await updateActualResponse.text();
-      let updateActualResult;
-      
-      try {
-        updateActualResult = JSON.parse(updateActualText);
-      } catch (parseError) {
-        console.error('Failed to parse BA update response:', updateActualText);
-        throw new Error(`Server returned invalid response: ${updateActualText.substring(0, 100)}...`);
-      }
-      
-      if (!updateActualResult.success) {
-        throw new Error(updateActualResult.error || 'Failed to update Column BA in JOINING sheet');
-      }
+      // Update Column BC with Type of Leave
+      updatePromises.push(
+        fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
+          method: 'POST',
+          body: new URLSearchParams({
+            sheetName: 'JOINING',
+            action: 'updateCell',
+            rowIndex: selectedItem.rowIndex.toString(),
+            columnIndex: '55',
+            value: formData.typeOfLeave,
+          }),
+        })
+      );
 
-      const updateTypeParams = new URLSearchParams({
-        sheetName: 'JOINING',
-        action: 'updateCell',
-        rowIndex: selectedItem.rowIndex.toString(),
-        columnIndex: '55',
-        value: formData.typeOfLeave,
-      });
+      // Update Column BD with Date
+      updatePromises.push(
+        fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
+          method: 'POST',
+          body: new URLSearchParams({
+            sheetName: 'JOINING',
+            action: 'updateCell',
+            rowIndex: selectedItem.rowIndex.toString(),
+            columnIndex: '56',
+            value: formattedLeavingDate,
+          }),
+        })
+      );
 
-      const updateTypeResponse = await fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
-        method: 'POST',
-        body: updateTypeParams,
-      });
+      // Update Column BE with Reason
+      updatePromises.push(
+        fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
+          method: 'POST',
+          body: new URLSearchParams({
+            sheetName: 'JOINING',
+            action: 'updateCell',
+            rowIndex: selectedItem.rowIndex.toString(),
+            columnIndex: '57',
+            value: formData.reasonOfLeaving,
+          }),
+        })
+      );
 
-      const updateTypeText = await updateTypeResponse.text();
-      let updateTypeResult;
-      
-      try {
-        updateTypeResult = JSON.parse(updateTypeText);
-      } catch (parseError) {
-        console.error('Failed to parse BC update response:', updateTypeText);
-        throw new Error(`Server returned invalid response: ${updateTypeText.substring(0, 100)}...`);
-      }
-      
-      if (!updateTypeResult.success) {
-        throw new Error(updateTypeResult.error || 'Failed to update Type of Leave in JOINING sheet');
-      }
+      // Update Column BG with Working Days
+      updatePromises.push(
+        fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
+          method: 'POST',
+          body: new URLSearchParams({
+            sheetName: 'JOINING',
+            action: 'updateCell',
+            rowIndex: selectedItem.rowIndex.toString(),
+            columnIndex: '104',
+            value: formData.workingDays,
+          }),
+        })
+      );
 
-      const updateDateParams = new URLSearchParams({
-        sheetName: 'JOINING',
-        action: 'updateCell',
-        rowIndex: selectedItem.rowIndex.toString(),
-        columnIndex: '56',
-        value: formattedLeavingDate,
-      });
+      // Update Column BH with Amount
+      updatePromises.push(
+        fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
+          method: 'POST',
+          body: new URLSearchParams({
+            sheetName: 'JOINING',
+            action: 'updateCell',
+            rowIndex: selectedItem.rowIndex.toString(),
+            columnIndex: '105',
+            value: formData.amount,
+          }),
+        })
+      );
 
-      const updateDateResponse = await fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
-        method: 'POST',
-        body: updateDateParams,
-      });
+      // Update Column BF with Last Working Date
+      updatePromises.push(
+        fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
+          method: 'POST',
+          body: new URLSearchParams({
+            sheetName: 'JOINING',
+            action: 'updateCell',
+            rowIndex: selectedItem.rowIndex.toString(),
+            columnIndex: '58',
+            value: formattedLastWorkingDate,
+          }),
+        })
+      );
 
-      const updateDateText = await updateDateResponse.text();
-      let updateDateResult;
-      
-      try {
-        updateDateResult = JSON.parse(updateDateText);
-      } catch (parseError) {
-        console.error('Failed to parse BD update response:', updateDateText);
-        throw new Error(`Server returned invalid response: ${updateDateText.substring(0, 100)}...`);
-      }
-      
-      if (!updateDateResult.success) {
-        throw new Error(updateDateResult.error || 'Failed to update Date in Column BD');
-      }
-
-      const updateReasonParams = new URLSearchParams({
-        sheetName: 'JOINING',
-        action: 'updateCell',
-        rowIndex: selectedItem.rowIndex.toString(),
-        columnIndex: '57',
-        value: formData.reasonOfLeaving,
-      });
-
-      const updateReasonResponse = await fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
-        method: 'POST',
-        body: updateReasonParams,
-      });
-
-      const updateReasonText = await updateReasonResponse.text();
-      let updateReasonResult;
-      
-      try {
-        updateReasonResult = JSON.parse(updateReasonText);
-      } catch (parseError) {
-        console.error('Failed to parse BE update response:', updateReasonText);
-        throw new Error(`Server returned invalid response: ${updateReasonText.substring(0, 100)}...`);
-      }
-      
-      if (!updateReasonResult.success) {
-        throw new Error(updateReasonResult.error || 'Failed to update Reason in Column BE');
-      }
-
-      const updateWorkingDaysParams = new URLSearchParams({
-        sheetName: 'JOINING',
-        action: 'updateCell',
-        rowIndex: selectedItem.rowIndex.toString(),
-        columnIndex: '104',
-        value: formData.workingDays,
-      });
-
-      const updateWorkingDaysResponse = await fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
-        method: 'POST',
-        body: updateWorkingDaysParams,
-      });
-
-      const updateWorkingDaysText = await updateWorkingDaysResponse.text();
-      let updateWorkingDaysResult;
-
-      try {
-        updateWorkingDaysResult = JSON.parse(updateWorkingDaysText);
-      } catch (parseError) {
-        console.error('Failed to parse BG update response:', updateWorkingDaysText);
-        throw new Error(`Server returned invalid response: ${updateWorkingDaysText.substring(0, 100)}...`);
-      }
-
-      if (!updateWorkingDaysResult.success) {
-        throw new Error(updateWorkingDaysResult.error || 'Failed to update Working Days in Column BG');
-      }
-
-      const updateAmountParams = new URLSearchParams({
-        sheetName: 'JOINING',
-        action: 'updateCell',
-        rowIndex: selectedItem.rowIndex.toString(),
-        columnIndex: '105',
-        value: formData.amount,
-      });
-
-      const updateAmountResponse = await fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
-        method: 'POST',
-        body: updateAmountParams,
-      });
-
-      const updateAmountText = await updateAmountResponse.text();
-      let updateAmountResult;
-
-      try {
-        updateAmountResult = JSON.parse(updateAmountText);
-      } catch (parseError) {
-        console.error('Failed to parse BH update response:', updateAmountText);
-        throw new Error(`Server returned invalid response: ${updateAmountText.substring(0, 100)}...`);
-      }
-
-      if (!updateAmountResult.success) {
-        throw new Error(updateAmountResult.error || 'Failed to update Amount in Column BH');
-      }
-
-      const updateLastWorkingParams = new URLSearchParams({
-        sheetName: 'JOINING',
-        action: 'updateCell',
-        rowIndex: selectedItem.rowIndex.toString(),
-        columnIndex: '58',
-        value: formattedLastWorkingDate,
-      });
-
-      const updateLastWorkingResponse = await fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
-        method: 'POST',
-        body: updateLastWorkingParams,
-      });
-
-      const updateLastWorkingText = await updateLastWorkingResponse.text();
-      let updateLastWorkingResult;
-      
-      try {
-        updateLastWorkingResult = JSON.parse(updateLastWorkingText);
-      } catch (parseError) {
-        console.error('Failed to parse BF update response:', updateLastWorkingText);
-        throw new Error(`Server returned invalid response: ${updateLastWorkingText.substring(0, 100)}...`);
-      }
-      
-      if (!updateLastWorkingResult.success) {
-        throw new Error(updateLastWorkingResult.error || 'Failed to update Last Working Date in Column BF');
-      }
-
+      // Prepare row data for LEAVING sheet
       const rowData = [
         formattedTimestamp,
         selectedItem.employeeNo,
@@ -424,46 +387,51 @@ const Leaving = () => {
         selectedItem.department,
       ];
 
-      const insertParams = new URLSearchParams({
-        sheetName: 'LEAVING',
-        action: 'insert',
-        rowData: JSON.stringify(rowData),
-      });
+      // Insert into LEAVING sheet
+      updatePromises.push(
+        fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
+          method: 'POST',
+          body: new URLSearchParams({
+            sheetName: 'LEAVING',
+            action: 'insert',
+            rowData: JSON.stringify(rowData),
+          }),
+        })
+      );
 
-      const insertResponse = await fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec', {
-        method: 'POST',
-        body: insertParams,
-      });
+      // Execute all updates
+      const responses = await Promise.all(updatePromises);
+      const results = await Promise.all(responses.map(async (r) => {
+        const text = await r.text();
+        try {
+          return JSON.parse(text);
+        } catch (parseError) {
+          console.error('Failed to parse response:', text);
+          return { success: false, error: 'Invalid response' };
+        }
+      }));
 
-      const insertText = await insertResponse.text();
-      let insertResult;
+      const hasError = results.some((result) => !result.success);
+      if (hasError) {
+        console.error('Update errors:', results.filter(r => !r.success));
+        throw new Error("Some updates failed");
+      }
+
+      setFormData({
+        dateOfLeaving: '',
+        reasonOfLeaving: '',
+        typeOfLeave: '',
+        mobileNumber: '',
+        lastWorkingDate: '',
+        workingDays: '',
+        amount: ''
+      });
+      setShowModal(false);
+      toast.success('Leaving request added successfully!');
+      setSelectedItem(null);
       
-      try {
-        insertResult = JSON.parse(insertText);
-      } catch (parseError) {
-        console.error('Failed to parse LEAVING insert response:', insertText);
-        throw new Error(`Server returned invalid response: ${insertText.substring(0, 100)}...`);
-      }
-
-      if (insertResult.success) {
-        setFormData({
-          dateOfLeaving: '',
-          reasonOfLeaving: '',
-          typeOfLeave: '',
-          mobileNumber: '',
-          lastWorkingDate: '',
-          workingDays: '',
-          amount: ''
-        });
-        setShowModal(false);
-        toast.success('Leaving request added successfully!');
-        setSelectedItem(null);
-        
-        await fetchJoiningData();
-        await fetchLeavingData();
-      } else {
-        throw new Error(insertResult.error || 'Failed to insert into LEAVING sheet');
-      }
+      // Refresh data
+      await fetchData();
     } catch (error) {
       console.error('Submit error:', error);
       toast.error('Something went wrong: ' + error.message);
@@ -472,38 +440,91 @@ const Leaving = () => {
     }
   };
 
+  // Loading state
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Leaving</h1>
+        </div>
+        <div className="bg-white p-4 rounded-lg shadow flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0 md:space-x-4">
+          <div className="flex flex-1 max-w-md">
+            <div className="relative w-full">
+              <input
+                type="text"
+                placeholder="Search by name or employee ID..."
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-500"
+                disabled
+              />
+              <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="p-6 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Loading leaving data...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Leaving</h1>
+        </div>
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="p-6 text-center">
+            <div className="text-red-500 text-xl mb-4">Error Loading Data</div>
+            <p className="text-gray-600 mb-4">{error}</p>
+            <button 
+              onClick={fetchData}
+              className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold ">Leaving </h1>
+        <h1 className="text-2xl font-bold">Leaving</h1>
       </div>
 
       {/* Filter and Search */}
-      <div className="bg-white  p-4 rounded-lg shadow flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0 md:space-x-4">
+      <div className="bg-white p-4 rounded-lg shadow flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0 md:space-x-4">
         <div className="flex flex-1 max-w-md">
           <div className="relative w-full">
             <input
               type="text"
               placeholder="Search by name or employee ID..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-300   rounded-lg focus:outline-none focus:ring-2  focus:ring-blue-500 bg-white   text-gray-500    "
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-500"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
-            <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500  " />
+            <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
           </div>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className=" bg-white  rounded-lg shadow overflow-hidden">
-        <div className="border-b border-gray-300  ">
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="border-b border-gray-300">
           <nav className="flex -mb-px">
             <button
               className={`py-4 px-6 font-medium text-sm border-b-2 ${
                 activeTab === 'pending'
-              ? 'border-indigo-500 text-indigo-600'
+                  ? 'border-indigo-500 text-indigo-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-               }`}
+              }`}
               onClick={() => setActiveTab('pending')}
             >
               <Clock size={16} className="inline mr-2" />
@@ -512,9 +533,9 @@ const Leaving = () => {
             <button
               className={`py-4 px-6 font-medium text-sm border-b-2 ${
                 activeTab === 'history'
-           ? 'border-indigo-500 text-indigo-600'
+                  ? 'border-indigo-500 text-indigo-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
+              }`}
               onClick={() => setActiveTab('history')}
             >
               <CheckCircle size={16} className="inline mr-2" />
@@ -527,8 +548,8 @@ const Leaving = () => {
         <div className="p-6">
           {activeTab === 'pending' && (
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-white  ">
-                <thead className="bg-gray-100 ">
+              <table className="min-w-full divide-y divide-white">
+                <thead className="bg-gray-100">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Serial Number</th>
@@ -539,37 +560,16 @@ const Leaving = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Department</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white  ">
-                  {error ? (
-                    <tr>
-                      <td colSpan="7" className="px-6 py-12 text-center">
-                        <p className="text-red-500">Error: {error}</p>
-                        <button 
-                          onClick={() => {
-                            fetchJoiningData();
-                            fetchLeavingData();
-                          }}
-                          className="mt-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-                        >
-                          Retry
-                        </button>
-                      </td>
-                    </tr>
-                  ) : filteredPendingData.length === 0 ? (
-                    <tr>
-                      <td colSpan="7" className="px-6 py-12 text-center">
-                        <p className="text-gray-500">No pending leaving requests found.</p>
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredPendingData.map((item,index) => (
-                      <tr key={index} className="hover:bg-white hover: ">
+                <tbody className="divide-y divide-white">
+                  {filteredPendingData.length > 0 ? (
+                    filteredPendingData.map((item, index) => (
+                      <tr key={index} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap">
                           <button
                             onClick={() => handleLeavingClick(item)}
-                            className="px-3 py-1  bg-indigo-700 text-white rounded-md  text-sm"
+                            className="px-3 py-1 bg-indigo-700 text-white rounded-md text-sm hover:bg-indigo-800"
                           >
-                            Leaving 
+                            Leaving
                           </button>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.employeeNo}</td>
@@ -582,6 +582,12 @@ const Leaving = () => {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.department}</td>
                       </tr>
                     ))
+                  ) : (
+                    <tr>
+                      <td colSpan="7" className="px-6 py-12 text-center">
+                        <p className="text-gray-500">No pending leaving requests found.</p>
+                      </td>
+                    </tr>
                   )}
                 </tbody>
               </table>
@@ -590,11 +596,11 @@ const Leaving = () => {
 
           {activeTab === 'history' && (
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-white  ">
-                <thead className="bg-gray-100 ">
+              <table className="min-w-full divide-y divide-white">
+                <thead className="bg-gray-100">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Serial Number</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date Of Joining</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date Of Leaving</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Designation</th>
@@ -602,31 +608,10 @@ const Leaving = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason Of Leaving</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white  ">
-                  {error ? (
-                    <tr>
-                      <td colSpan="7" className="px-6 py-12 text-center">
-                        <p className="text-red-500">Error: {error}</p>
-                        <button 
-                          onClick={() => {
-                            fetchJoiningData();
-                            fetchLeavingData();
-                          }}
-                          className="mt-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-                        >
-                          Retry
-                        </button>
-                      </td>
-                    </tr>
-                  ) : filteredHistoryData.length === 0 ? (
-                    <tr>
-                      <td colSpan="7" className="px-6 py-12 text-center">
-                        <p className="text-gray-500">No leaving history found.</p>
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredHistoryData.map((item,index) => (
-                      <tr key={index} className="hover:bg-white hover: ">
+                <tbody className="divide-y divide-white">
+                  {filteredHistoryData.length > 0 ? (
+                    filteredHistoryData.map((item, index) => (
+                      <tr key={index} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.employeeId}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.name}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -640,6 +625,12 @@ const Leaving = () => {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.reasonOfLeaving}</td>
                       </tr>
                     ))
+                  ) : (
+                    <tr>
+                      <td colSpan="7" className="px-6 py-12 text-center">
+                        <p className="text-gray-500">No leaving history found.</p>
+                      </td>
+                    </tr>
                   )}
                 </tbody>
               </table>
@@ -650,10 +641,10 @@ const Leaving = () => {
 
       {/* Modal */}
       {showModal && selectedItem && (
-        <div className="fixed inset-0 modal-backdrop flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center p-6 border-b border-gray-300 sticky top-0 bg-white z-10">
-              <h3 className="text-lg font-medium text-gray-700">Leaving Form </h3>
+              <h3 className="text-lg font-medium text-gray-700">Leaving Form</h3>
               <button onClick={() => setShowModal(false)} className="text-gray-700">
                 <X size={20} />
               </button>
@@ -665,7 +656,7 @@ const Leaving = () => {
                   type="text"
                   value={selectedItem.employeeNo}
                   disabled
-                  className="w-full border border-gray-500 rounded-md px-3 py-2 bg-white text-gray-700"
+                  className="w-full border border-gray-500 rounded-md px-3 py-2 bg-gray-100 text-gray-700"
                 />
               </div>
               
@@ -675,7 +666,7 @@ const Leaving = () => {
                   type="text"
                   value={selectedItem.employeeCode || ''}
                   disabled
-                  className="w-full border border-gray-500 rounded-md px-3 py-2 bg-white text-gray-700"
+                  className="w-full border border-gray-500 rounded-md px-3 py-2 bg-gray-100 text-gray-700"
                 />
               </div>
               
@@ -685,7 +676,7 @@ const Leaving = () => {
                   type="text"
                   value={selectedItem.candidateName}
                   disabled
-                  className="w-full border border-gray-500 rounded-md px-3 py-2 bg-white text-gray-700"
+                  className="w-full border border-gray-500 rounded-md px-3 py-2 bg-gray-100 text-gray-700"
                 />
               </div>
               
