@@ -23,7 +23,7 @@ const Leaving = () => {
   });
 // Cache for faster subsequent loads
 const CACHE_KEY = 'leaving_data_cache';
-const CACHE_EXPIRY = 5 * 60 * 1000; // 5 minutes
+const CACHE_EXPIRY = 10 * 60 * 1000; // 5 minutes
 
 // Add this inside your component function, before fetchData
 const [lastFetchTime, setLastFetchTime] = useState(0);
