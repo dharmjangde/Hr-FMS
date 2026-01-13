@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Search, Clock, CheckCircle, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -21,59 +21,54 @@ const Leaving = () => {
     workingDays: '',
     amount: ''
   });
+// Cache for faster subsequent loads
+const CACHE_KEY = 'leaving_data_cache';
+const CACHE_EXPIRY = 5 * 60 * 1000; // 5 minutes
 
+// Add this inside your component function, before fetchData
+const [lastFetchTime, setLastFetchTime] = useState(0);
+const FETCH_INTERVAL = 30 * 1000; // 30 seconds minimum between fetches
   // Fetch both datasets in parallel
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      console.log('Fetching leaving data from API...');
-      
-      // Fetch both JOINING and LEAVING data in parallel
-      const [joiningResponse, leavingResponse] = await Promise.all([
-        fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=JOINING&action=fetch'),
-        fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=LEAVING&action=fetch')
-      ]);
-      
-      console.log('JOINING Response status:', joiningResponse.status);
-      console.log('LEAVING Response status:', leavingResponse.status);
-      
-      if (!joiningResponse.ok || !leavingResponse.ok) {
-        throw new Error(`HTTP error! status: ${joiningResponse.status}/${leavingResponse.status}`);
-      }
-      
-      const joiningResult = await joiningResponse.json();
-      const leavingResult = await leavingResponse.json();
-      
-      console.log('JOINING API Response:', joiningResult.success ? 'Success' : 'Failed');
-      console.log('LEAVING API Response:', leavingResult.success ? 'Success' : 'Failed');
-      
-      if (joiningResult.success) {
-        const processedJoiningData = processJoiningData(joiningResult.data);
-        console.log('Processed JOINING Data:', processedJoiningData.length, 'records');
-        setPendingData(processedJoiningData);
-      } else {
-        throw new Error(joiningResult.error || 'Failed to fetch data from JOINING sheet');
-      }
-      
-      if (leavingResult.success) {
-        const processedLeavingData = processLeavingData(leavingResult.data);
-        console.log('Processed LEAVING Data:', processedLeavingData.length, 'records');
-        setHistoryData(processedLeavingData);
-      } else {
-        throw new Error(leavingResult.error || 'Failed to fetch data from LEAVING sheet');
-      }
-      
-    } catch (err) {
-      console.error('Error fetching leaving data:', err);
-      setError(err.message);
-      toast.error(`Failed to load data: ${err.message}`);
-    } finally {
-      setLoading(false);
+ // Fetch both datasets in parallel - OPTIMIZED VERSION
+const fetchData = async () => {
+  try {
+    setLoading(true);
+    setError(null);
+    
+    // Use Promise.all for parallel fetching with timeout
+    const [joiningResponse, leavingResponse] = await Promise.all([
+      fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=JOINING&action=fetch&cacheBuster=' + Date.now()),
+      fetch('https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=LEAVING&action=fetch&cacheBuster=' + Date.now())
+    ]);
+    
+    // Parse JSON responses in parallel
+    const [joiningResult, leavingResult] = await Promise.all([
+      joiningResponse.json(),
+      leavingResponse.json()
+    ]);
+    
+    if (joiningResult.success) {
+      const processedJoiningData = processJoiningData(joiningResult.data);
+      setPendingData(processedJoiningData);
+    } else {
+      throw new Error(joiningResult.error || 'Failed to fetch JOINING data');
     }
-  };
-
+    
+    if (leavingResult.success) {
+      const processedLeavingData = processLeavingData(leavingResult.data);
+      setHistoryData(processedLeavingData);
+    } else {
+      throw new Error(leavingResult.error || 'Failed to fetch LEAVING data');
+    }
+    
+  } catch (err) {
+    console.error('Error fetching leaving data:', err);
+    setError(err.message);
+    toast.error(`Failed to load data: ${err.message}`);
+  } finally {
+    setLoading(false);
+  }
+};
   // Process JOINING sheet data
   const processJoiningData = (sheetData) => {
     if (!sheetData || sheetData.length === 0) {

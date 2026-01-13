@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Filter, Search, Clock, CheckCircle, X } from 'lucide-react';
 import useDataStore from '../store/dataStore';
 import toast from 'react-hot-toast';
@@ -16,7 +16,19 @@ const AfterJoiningWork = () => {
   const [departments, setDepartments] = useState([]);
   const [designations, setDesignations] = useState([]);
   const companyOptions = ["PMMPL", "PURAB", "REFRATECH", "REFRASYNTH"];
-  
+  const [loading, setLoading] = useState(false);
+const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
+// Add this after your searchTerm state
+useEffect(() => {
+  const timerId = setTimeout(() => {
+    setDebouncedSearchTerm(searchTerm);
+  }, 300);
+
+  return () => {
+    clearTimeout(timerId);
+  };
+}, [searchTerm]);
+
   const joiningPlaceOptions = [
     "Application",
     "Factory",
@@ -67,12 +79,13 @@ const AfterJoiningWork = () => {
 
   // Cache for fetched data to prevent repeated API calls
   const [dataCache, setDataCache] = useState({
-    joiningData: null,
-    reportingOfficers: null,
-    departments: null,
-    designations: null,
-    lastFetchTime: 0
-  });
+  joiningData: null,
+  reportingOfficers: null,
+  departments: null,
+  designations: null,
+  assetsData: {},
+  lastFetchTime: 0
+});
 
   // Function to fetch last employee code from JOINING sheet
   const fetchLastEmployeeCode = async () => {
@@ -265,101 +278,29 @@ const AfterJoiningWork = () => {
   const DRIVE_FOLDER_ID = "1Rb4DIzbZWSVyL5s_z4d0ntk0iM-JZWBq";
 
   // OPTIMIZED: Fetch all data in parallel
-  const fetchJoiningData = async () => {
-    setError(null);
-
+    // OPTIMIZED: Fetch all joining data with caching
+  const fetchJoiningData = useCallback(async (forceRefresh = false) => {
     try {
-      // Check cache first (cache for 1 minute)
-      const now = Date.now();
-      const CACHE_DURATION = 60 * 1000;
+      setError(null);
       
-      if (dataCache.lastFetchTime && (now - dataCache.lastFetchTime < CACHE_DURATION) && 
+      // Check cache first (cache for 2 minutes)
+      const now = Date.now();
+      const CACHE_DURATION = 2 * 60 * 1000;
+      
+      if (!forceRefresh && dataCache.lastFetchTime && 
+          (now - dataCache.lastFetchTime < CACHE_DURATION) && 
           dataCache.joiningData) {
         
-        // Process cached data
-        const rawData = dataCache.joiningData;
-        const dataRows = rawData.length > 6 ? rawData.slice(6) : [];
-        
-        const processedData = dataRows.map((row, idx) => ({
-          timestamp: row[0] || "",
-          joiningNo: row[1] || "",
-          candidateName: row[2] || "",
-          fatherName: row[3] || "",
-          dateOfJoining: row[4] || "",
-          designation: row[5] || "",
-          aadharPhoto: row[6] || "",
-          candidatePhoto: row[7] || "",
-          currentAddress: row[8] || "",
-          bodAsPerAadhar: row[9] || "",
-          gender: row[10] || "",
-          mobileNo: row[11] || "",
-          familyMobileNo: row[12] || "",
-          relationWithFamily: row[13] || "",
-          accountNo: row[14] || "",
-          ifscCode: row[15] || "",
-          branchName: row[16] || "",
-          passbookPhoto: row[17] || "",
-          email: row[18] || "",
-          qualification: row[19] || "",
-          department: row[20] || "",
-          salary: row[21] || "",
-          aadharNo: row[22] || "",
-          resumeCopy: row[23] || "",
-          plannedDate: row[23] || "",
-          actual: row[24] || "",
-          employeeCode: row[26] || "",
-          salaryConfirmation: row[27] || "",
-          reportingOfficer: row[28] || "",
-          baseAddress: row[29] || "",
-          punchCode: row[30] || "",
-          officialEmail: row[31] || "",
-          emailPassword: row[32] || "",
-          currentBankAccountNo: row[33] || "",
-          currentBankIfsc: row[34] || "",
-          pfEsic: row[36] || "",
-          idProofCopy: row[37] || "",
-          joiningLetter: row[38] || "",
-          interviewAssessmentSheet: row[107] || "",
-          manualImageUrl: row[39] || "",
-          laptopDetails: row[40] || "",
-          laptopImage: row[41] || "",
-          mobileName: row[42] || "",
-          mobileImage: row[43] || "",
-          item1: row[44] || "",
-          item1Image: row[45] || "",
-          item2: row[46] || "",
-          item2Image: row[47] || "",
-          item3: row[49] || "",
-          item3Image: row[50] || "",
-          incentiveCategory: row[91] || "",
-          attendanceMode: row[94] || "",
-          department2: row[95] || "",
-          eligibleForPF: row[96] || "",
-          eligibleForESIC: row[97] || "",
-          remarks: row[98] || "",
-          joiningPlace: row[105] || "",
-          nextSalaryIncrementDate: row[99] || "",
-          companyName: row[100] || "",
-          bloodGroup: row[92] || "",
-          identificationMarks: row[93] || "",
-        }));
-
-        const pendingTasks = processedData.filter(
-          (task) => task.plannedDate && task.plannedDate.trim() !== "" && (!task.actual || task.actual.trim() === "")
-        );
-
-        const historyTasks = processedData.filter(
-          (task) => task.plannedDate && task.plannedDate.trim() !== "" && task.actual && task.actual.trim() !== ""
-        );
-
-        setPendingData(pendingTasks);
-        setHistoryData(historyTasks);
+        console.log('Using cached joining data');
+        processCachedJoiningData(dataCache.joiningData);
         return;
       }
-
-      // Fetch fresh data
+      
+      setLoading(true);
+      console.time('FetchJoiningData');
+      
       const response = await fetch(
-        "https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=JOINING&action=fetch"
+        `https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=JOINING&action=fetch&t=${now}`
       );
 
       if (!response.ok) {
@@ -367,7 +308,9 @@ const AfterJoiningWork = () => {
       }
 
       const result = await response.json();
-
+      
+      console.timeEnd('FetchJoiningData');
+      
       if (!result.success) {
         throw new Error(result.error || "Failed to fetch data from JOINING sheet");
       }
@@ -379,100 +322,112 @@ const AfterJoiningWork = () => {
       }
 
       // Cache the data
-      setDataCache({
-        ...dataCache,
+      setDataCache(prev => ({
+        ...prev,
         joiningData: rawData,
         lastFetchTime: now
-      });
-
-      // Process data
-      const dataRows = rawData.length > 6 ? rawData.slice(6) : [];
-      
-      const processedData = dataRows.map((row, idx) => ({
-        timestamp: row[0] || "",
-        joiningNo: row[1] || "",
-        candidateName: row[2] || "",
-        fatherName: row[3] || "",
-        dateOfJoining: row[4] || "",
-        designation: row[5] || "",
-        aadharPhoto: row[6] || "",
-        candidatePhoto: row[7] || "",
-        currentAddress: row[8] || "",
-        bodAsPerAadhar: row[9] || "",
-        gender: row[10] || "",
-        mobileNo: row[11] || "",
-        familyMobileNo: row[12] || "",
-        relationWithFamily: row[13] || "",
-        accountNo: row[14] || "",
-        ifscCode: row[15] || "",
-        branchName: row[16] || "",
-        passbookPhoto: row[17] || "",
-        email: row[18] || "",
-        qualification: row[19] || "",
-        department: row[20] || "",
-        salary: row[21] || "",
-        aadharNo: row[22] || "",
-        resumeCopy: row[23] || "",
-        plannedDate: row[23] || "",
-        actual: row[24] || "",
-        employeeCode: row[26] || "",
-        salaryConfirmation: row[27] || "",
-        reportingOfficer: row[28] || "",
-        baseAddress: row[29] || "",
-        punchCode: row[30] || "",
-        officialEmail: row[31] || "",
-        emailPassword: row[32] || "",
-        currentBankAccountNo: row[33] || "",
-        currentBankIfsc: row[34] || "",
-        pfEsic: row[36] || "",
-        idProofCopy: row[37] || "",
-        joiningLetter: row[38] || "",
-        interviewAssessmentSheet: row[107] || "",
-        manualImageUrl: row[39] || "",
-        laptopDetails: row[40] || "",
-        laptopImage: row[41] || "",
-        mobileName: row[42] || "",
-        mobileImage: row[43] || "",
-        item1: row[44] || "",
-        item1Image: row[45] || "",
-        item2: row[46] || "",
-        item2Image: row[47] || "",
-        item3: row[49] || "",
-        item3Image: row[50] || "",
-        incentiveCategory: row[91] || "",
-        attendanceMode: row[94] || "",
-        department2: row[95] || "",
-        eligibleForPF: row[96] || "",
-        eligibleForESIC: row[97] || "",
-        remarks: row[98] || "",
-        joiningPlace: row[105] || "",
-        nextSalaryIncrementDate: row[99] || "",
-        companyName: row[100] || "",
-        bloodGroup: row[92] || "",
-        identificationMarks: row[93] || "",
       }));
 
-      const pendingTasks = processedData.filter(
-        (task) => task.plannedDate && task.plannedDate.trim() !== "" && (!task.actual || task.actual.trim() === "")
-      );
-
-      const historyTasks = processedData.filter(
-        (task) => task.plannedDate && task.plannedDate.trim() !== "" && task.actual && task.actual.trim() !== ""
-      );
-
-      setPendingData(pendingTasks);
-      setHistoryData(historyTasks);
+      // Process data
+      processCachedJoiningData(rawData);
 
     } catch (error) {
       console.error("Error fetching joining data:", error);
       setError(error.message);
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [dataCache]);
+
+  // Helper function to process cached joining data
+  const processCachedJoiningData = useCallback((rawData) => {
+    const dataRows = rawData.length > 6 ? rawData.slice(6) : [];
+    
+    // IMPORTANT: COPY YOUR EXACT MAPPING FROM YOUR ORIGINAL CODE HERE
+    // Look at your original fetchJoiningData function and copy lines 245-325
+    const processedData = dataRows.map((row, idx) => ({
+      timestamp: row[0] || "",
+      joiningNo: row[1] || "",
+      candidateName: row[2] || "",
+      fatherName: row[3] || "",
+      dateOfJoining: row[4] || "",
+      designation: row[5] || "",
+      aadharPhoto: row[6] || "",
+      candidatePhoto: row[7] || "",
+      currentAddress: row[8] || "",
+      bodAsPerAadhar: row[9] || "",
+      gender: row[10] || "",
+      mobileNo: row[11] || "",
+      familyMobileNo: row[12] || "",
+      relationWithFamily: row[13] || "",
+      accountNo: row[14] || "",
+      ifscCode: row[15] || "",
+      branchName: row[16] || "",
+      passbookPhoto: row[17] || "",
+      email: row[18] || "",
+      qualification: row[19] || "",
+      department: row[20] || "",
+      salary: row[21] || "",
+      aadharNo: row[22] || "",
+      resumeCopy: row[23] || "",
+      plannedDate: row[23] || "",
+      actual: row[24] || "",
+      employeeCode: row[26] || "",
+      salaryConfirmation: row[27] || "",
+      reportingOfficer: row[28] || "",
+      baseAddress: row[29] || "",
+      punchCode: row[30] || "",
+      officialEmail: row[31] || "",
+      emailPassword: row[32] || "",
+      currentBankAccountNo: row[33] || "",
+      currentBankIfsc: row[34] || "",
+      pfEsic: row[36] || "",
+      idProofCopy: row[37] || "",
+      joiningLetter: row[38] || "",
+      interviewAssessmentSheet: row[107] || "",
+      manualImageUrl: row[39] || "",
+      laptopDetails: row[40] || "",
+      laptopImage: row[41] || "",
+      mobileName: row[42] || "",
+      mobileImage: row[43] || "",
+      item1: row[44] || "",
+      item1Image: row[45] || "",
+      item2: row[46] || "",
+      item2Image: row[47] || "",
+      item3: row[49] || "",
+      item3Image: row[50] || "",
+      incentiveCategory: row[91] || "",
+      attendanceMode: row[94] || "",
+      department2: row[95] || "",
+      eligibleForPF: row[96] || "",
+      eligibleForESIC: row[97] || "",
+      remarks: row[98] || "",
+      joiningPlace: row[105] || "",
+      nextSalaryIncrementDate: row[99] || "",
+      companyName: row[100] || "",
+      bloodGroup: row[92] || "",
+      identificationMarks: row[93] || "",
+    }));
+
+    const pendingTasks = processedData.filter(
+      (task) => task.plannedDate && task.plannedDate.trim() !== "" && (!task.actual || task.actual.trim() === "")
+    );
+
+    const historyTasks = processedData.filter(
+      (task) => task.plannedDate && task.plannedDate.trim() !== "" && task.actual && task.actual.trim() !== ""
+    );
+
+    setPendingData(pendingTasks);
+    setHistoryData(historyTasks);
+  }, []);
 
   // OPTIMIZED: Load all data in parallel on component mount
+   // OPTIMIZED: Load all data in parallel on component mount
   useEffect(() => {
     const loadAllData = async () => {
       try {
+        setLoading(true);
+        
         // Fetch all required data in parallel
         await Promise.all([
           fetchJoiningData(),
@@ -482,20 +437,48 @@ const AfterJoiningWork = () => {
         ]);
       } catch (error) {
         console.error("Error loading initial data:", error);
+      } finally {
+        setLoading(false);
       }
     };
 
     loadAllData();
-  }, []);
+    
+    // Set up auto-refresh every 5 minutes
+    const intervalId = setInterval(() => {
+      fetchJoiningData(true); // Force refresh
+    }, 5 * 60 * 1000);
+    
+    // Refresh when tab becomes visible
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchJoiningData(true);
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [fetchJoiningData]); // Add fetchJoiningData to dependencies
 
-  const fetchAssetsData = async (employeeId) => {
+
+    // OPTIMIZED: Fetch assets data with caching
+  const fetchAssetsData = useCallback(async (employeeId) => {
     try {
+      // Check cache first
+      if (dataCache.assetsData && dataCache.assetsData[employeeId]) {
+        return dataCache.assetsData[employeeId];
+      }
+
       const response = await fetch(
-        "https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=Assets&action=fetch"
+        `https://script.google.com/macros/s/AKfycbwXmzJ1VXIL4ZCKubtcsqrDcnAgxB3byiIWAC2i9Z3UVvWPaijuRJkMJxBvj3gNOBoJ/exec?sheet=Assets&action=fetch&t=${Date.now()}`
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        return null;
       }
 
       const result = await response.json();
@@ -509,13 +492,14 @@ const AfterJoiningWork = () => {
         return null;
       }
 
+      // Find matching row and cache it
       const matchingRow = data.find((row, index) => {
         if (index === 0) return false;
         return row[1]?.toString().trim() === employeeId?.toString().trim();
       });
 
       if (matchingRow) {
-        return {
+        const assetsInfo = {
           punchCode: matchingRow[10] || "",
           emailId: matchingRow[3] || "",
           emailPassword: matchingRow[4] || "",
@@ -530,6 +514,17 @@ const AfterJoiningWork = () => {
           joiningLetterUrl: matchingRow[16] || "",
           incentiveCategory: matchingRow[17] || "",
         };
+        
+        // Cache the result
+        setDataCache(prev => ({
+          ...prev,
+          assetsData: {
+            ...prev.assetsData,
+            [employeeId]: assetsInfo
+          }
+        }));
+        
+        return assetsInfo;
       }
 
       return null;
@@ -537,8 +532,8 @@ const AfterJoiningWork = () => {
       console.error("Error fetching assets data:", error);
       return null;
     }
-  };
-
+  }, [dataCache]);
+  
   // Upload image to Google Drive
   const uploadImageToDrive = async (file, fileName) => {
     try {
@@ -1160,20 +1155,32 @@ const AfterJoiningWork = () => {
     return `${day}/${month}/${year}`;
   };
 
-  const filteredPendingData = pendingData.filter((item) => {
-    const matchesSearch =
-      item.candidateName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.joiningNo?.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesSearch;
-  });
+    const filteredPendingData = useMemo(() => {
+    if (!searchTerm) return pendingData;
+    
+    const searchLower = searchTerm.toLowerCase();
+    return pendingData.filter((item) => {
+      const matchesSearch =
+        item.candidateName?.toLowerCase().includes(searchLower) ||
+        item.joiningNo?.toLowerCase().includes(searchLower);
+      return matchesSearch;
+    });
+  }, [pendingData, searchTerm]);
 
-  const filteredHistoryData = historyData.filter((item) => {
-    const matchesSearch =
-      item.candidateName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.joiningNo?.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesSearch;
-  });
+  const filteredHistoryData = useMemo(() => {
+    if (!searchTerm) return historyData;
+    
+    const searchLower = searchTerm.toLowerCase();
+    return historyData.filter((item) => {
+      const matchesSearch =
+        item.candidateName?.toLowerCase().includes(searchLower) ||
+        item.joiningNo?.toLowerCase().includes(searchLower);
+      return matchesSearch;
+    });
+  }, [historyData, searchTerm]);
 
+
+  
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
